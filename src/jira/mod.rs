@@ -2,6 +2,7 @@ pub mod adf;
 pub mod client;
 
 use std::path::Path;
+use std::str::FromStr;
 use tokio::time::{Duration, sleep};
 use tracing::{debug, error, info};
 
@@ -13,6 +14,18 @@ use crate::planner;
 use crate::state::StateDb;
 use crate::validate_ticket_key;
 
+/// Compute how long to sleep until the next cron tick.
+fn duration_until_next(schedule: &cron::Schedule) -> Duration {
+    let now = chrono::Utc::now();
+    match schedule.upcoming(chrono::Utc).next() {
+        Some(next) => {
+            let delta = next - now;
+            delta.to_std().unwrap_or(Duration::from_secs(1))
+        }
+        None => Duration::from_secs(60),
+    }
+}
+
 pub async fn run_sync_loop(config: Config) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let client = JiraClient::new(
         &config.jira_base_url(),
@@ -23,17 +36,42 @@ pub async fn run_sync_loop(config: Config) -> Result<(), Box<dyn std::error::Err
     let output_dir = config.output_dir();
     std::fs::create_dir_all(&output_dir)?;
 
-    info!(
-        jql = %config.jira.jql,
-        poll_interval_secs = config.jira.poll_interval_secs,
-        "Jira sync loop starting"
-    );
+    let cron_schedule = match &config.jira.cron_schedule {
+        Some(expr) => {
+            let schedule = cron::Schedule::from_str(expr)
+                .map_err(|e| format!("invalid cron_schedule '{}': {}", expr, e))?;
+            info!(
+                jql = %config.jira.jql,
+                cron_schedule = %expr,
+                "Jira sync loop starting (cron)"
+            );
+            Some(schedule)
+        }
+        None => {
+            info!(
+                jql = %config.jira.jql,
+                poll_interval_secs = config.jira.poll_interval_secs,
+                "Jira sync loop starting"
+            );
+            None
+        }
+    };
 
     loop {
         if let Err(e) = sync_once(&config, &client, &output_dir).await {
             error!(error = %e, "sync_once failed");
         }
-        sleep(Duration::from_secs(config.jira.poll_interval_secs)).await;
+
+        match &cron_schedule {
+            Some(schedule) => {
+                let wait = duration_until_next(schedule);
+                debug!(wait_secs = wait.as_secs(), "sleeping until next cron tick");
+                sleep(wait).await;
+            }
+            None => {
+                sleep(Duration::from_secs(config.jira.poll_interval_secs)).await;
+            }
+        }
     }
 }
 

@@ -59,6 +59,10 @@ pub struct JiraConfig {
     #[serde(default = "default_fetch_limit")]
     pub fetch_limit: u32,
     pub jql: String,
+    /// Cron expression for the sync schedule. When set, this takes precedence
+    /// over `poll_interval_secs`. Uses 7-field cron syntax:
+    /// `sec min hour day-of-month month day-of-week year`
+    pub cron_schedule: Option<String>,
 }
 
 impl std::fmt::Debug for JiraConfig {
@@ -70,6 +74,7 @@ impl std::fmt::Debug for JiraConfig {
             .field("poll_interval_secs", &self.poll_interval_secs)
             .field("fetch_limit", &self.fetch_limit)
             .field("jql", &self.jql)
+            .field("cron_schedule", &self.cron_schedule)
             .finish()
     }
 }
