@@ -16,7 +16,7 @@ fn test_parse_full_config() {
 instance = "acme"
 email = "dev@acme.com"
 api_token = "secret-token"
-poll_interval_secs = 120
+cron_schedule = "0 */2 * * * *"
 fetch_limit = 10
 jql = 'assignee = currentUser()'
 
@@ -48,7 +48,7 @@ poll_interval_secs = 30
     assert_eq!(cfg.jira.instance, "acme");
     assert_eq!(cfg.jira.email, "dev@acme.com");
     assert_eq!(cfg.jira.api_token, "secret-token");
-    assert_eq!(cfg.jira.poll_interval_secs, 120);
+    assert_eq!(cfg.jira.cron_schedule, "0 */2 * * * *");
     assert_eq!(cfg.jira.fetch_limit, 10);
     assert_eq!(cfg.jira.jql, "assignee = currentUser()");
 
@@ -97,7 +97,7 @@ repo_root = "~/projects/repo"
     let cfg = Config::load(f.path()).expect("parse minimal config");
 
     // Defaults
-    assert_eq!(cfg.jira.poll_interval_secs, 60);
+    assert_eq!(cfg.jira.cron_schedule, "0 */5 * * * *");
     assert_eq!(cfg.jira.fetch_limit, 5);
 
     assert_eq!(cfg.paths.state_dir, "~/.dev-pipeline");

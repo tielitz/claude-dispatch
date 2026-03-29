@@ -71,8 +71,7 @@ cp config.example.toml config.toml
 instance = "mycompany"               # → https://mycompany.atlassian.net
 email = "you@company.com"
 api_token = "your-api-token"
-poll_interval_secs = 60
-cron_schedule = "0 */5 * * * *"       # optional; overrides poll_interval_secs when set
+cron_schedule = "0 */5 * * * *"       # 6-field cron: sec min hour dom month dow
 fetch_limit = 5
 jql = 'assignee = currentUser() AND status = "In Progress"'
 

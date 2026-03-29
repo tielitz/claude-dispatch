@@ -2,7 +2,6 @@
 instance = "mycompany"
 email = "you@company.com"
 api_token = "your-api-token"
-poll_interval_secs = 60
 cron_schedule = "0 */5 * * * *"
 fetch_limit = 5
 jql = 'assignee = currentUser() AND status = "In Progress"'

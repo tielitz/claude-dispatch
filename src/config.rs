@@ -1,8 +1,8 @@
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
-fn default_poll_interval() -> u64 {
-    60
+fn default_cron_schedule() -> String {
+    "0 */5 * * * *".to_string()
 }
 
 fn default_fetch_limit() -> u32 {
@@ -54,15 +54,14 @@ pub struct JiraConfig {
     pub instance: String,
     pub email: String,
     pub api_token: String,
-    #[serde(default = "default_poll_interval")]
-    pub poll_interval_secs: u64,
     #[serde(default = "default_fetch_limit")]
     pub fetch_limit: u32,
     pub jql: String,
-    /// Cron expression for the sync schedule. When set, this takes precedence
-    /// over `poll_interval_secs`. Uses 7-field cron syntax:
-    /// `sec min hour day-of-month month day-of-week year`
-    pub cron_schedule: Option<String>,
+    /// Cron expression for the Jira sync schedule.
+    /// Uses 6-field cron syntax: `sec min hour day-of-month month day-of-week`.
+    /// Defaults to `"0 */5 * * * *"` (every 5 minutes).
+    #[serde(default = "default_cron_schedule")]
+    pub cron_schedule: String,
 }
 
 impl std::fmt::Debug for JiraConfig {
@@ -71,7 +70,6 @@ impl std::fmt::Debug for JiraConfig {
             .field("instance", &self.instance)
             .field("email", &self.email)
             .field("api_token", &"[REDACTED]")
-            .field("poll_interval_secs", &self.poll_interval_secs)
             .field("fetch_limit", &self.fetch_limit)
             .field("jql", &self.jql)
             .field("cron_schedule", &self.cron_schedule)

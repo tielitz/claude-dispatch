@@ -36,42 +36,23 @@ pub async fn run_sync_loop(config: Config) -> Result<(), Box<dyn std::error::Err
     let output_dir = config.output_dir();
     std::fs::create_dir_all(&output_dir)?;
 
-    let cron_schedule = match &config.jira.cron_schedule {
-        Some(expr) => {
-            let schedule = cron::Schedule::from_str(expr)
-                .map_err(|e| format!("invalid cron_schedule '{}': {}", expr, e))?;
-            info!(
-                jql = %config.jira.jql,
-                cron_schedule = %expr,
-                "Jira sync loop starting (cron)"
-            );
-            Some(schedule)
-        }
-        None => {
-            info!(
-                jql = %config.jira.jql,
-                poll_interval_secs = config.jira.poll_interval_secs,
-                "Jira sync loop starting"
-            );
-            None
-        }
-    };
+    let schedule = cron::Schedule::from_str(&config.jira.cron_schedule)
+        .map_err(|e| format!("invalid cron_schedule '{}': {}", config.jira.cron_schedule, e))?;
+
+    info!(
+        jql = %config.jira.jql,
+        cron_schedule = %config.jira.cron_schedule,
+        "Jira sync loop starting"
+    );
 
     loop {
         if let Err(e) = sync_once(&config, &client, &output_dir).await {
             error!(error = %e, "sync_once failed");
         }
 
-        match &cron_schedule {
-            Some(schedule) => {
-                let wait = duration_until_next(schedule);
-                debug!(wait_secs = wait.as_secs(), "sleeping until next cron tick");
-                sleep(wait).await;
-            }
-            None => {
-                sleep(Duration::from_secs(config.jira.poll_interval_secs)).await;
-            }
-        }
+        let wait = duration_until_next(&schedule);
+        debug!(wait_secs = wait.as_secs(), "sleeping until next cron tick");
+        sleep(wait).await;
     }
 }
 
