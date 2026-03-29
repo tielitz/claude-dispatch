@@ -11,6 +11,7 @@ use crate::jira::client::JiraClient;
 use crate::markdown::generate_ticket_markdown;
 use crate::planner;
 use crate::state::StateDb;
+use crate::validate_ticket_key;
 
 pub async fn run_sync_loop(config: Config) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let client = JiraClient::new(
@@ -55,6 +56,11 @@ async fn sync_once(
     let db = StateDb::open(&config.db_path())?;
 
     for ticket in &tickets {
+        if !validate_ticket_key(&ticket.key) {
+            error!(key = %ticket.key, "Jira ticket key failed validation, skipping");
+            continue;
+        }
+
         if db.is_known(&ticket.key)? {
             debug!(key = %ticket.key, "Skipping {} (already processed)", ticket.key);
             continue;
