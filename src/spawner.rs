@@ -98,33 +98,7 @@ async fn spawn_tmux_session(
         .map(|p| p.display().to_string())
         .unwrap_or_default();
 
-    // --- Build claude arguments as a shell array ---
-    // Using a bash array avoids injection via extra_flags or worktree branch names.
-    let mut claude_array_elements: Vec<String> = Vec::new();
-
-    if config.worktree.enabled {
-        let branch = config.branch_for_ticket(ticket_key);
-        claude_array_elements.push(shell_escape("--worktree"));
-        claude_array_elements.push(shell_escape(&branch));
-    }
-
-    // The prompt references the plan file via @<path> so Claude reads it directly.
-    // This avoids loading file content into a shell variable (ARG_MAX, metacharacters).
-    claude_array_elements.push(shell_escape("-p"));
-    claude_array_elements.push("\"Implement the plan in @$CDP_PLAN_FILE\"".to_string());
-
-    // Parse extra_flags into individual arguments and validate each one
-    if !config.claude.extra_flags.is_empty() {
-        for flag in config.claude.extra_flags.split_whitespace() {
-            if !flag.starts_with('-') {
-                warn!(flag = %flag, "Skipping extra_flag that doesn't start with '-'");
-                continue;
-            }
-            claude_array_elements.push(shell_escape(flag));
-        }
-    }
-
-    let claude_args_str = claude_array_elements.join(" ");
+    let claude_args_str = build_claude_args(config, ticket_key).join(" ");
 
     // --- Write wrapper script ---
     // All dynamic values are passed via environment variables set by tmux,
@@ -259,4 +233,226 @@ read -r
 /// Any embedded single quotes are replaced with `'\''` (end quote, escaped quote, start quote).
 fn shell_escape(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// Build the list of shell-escaped claude CLI arguments.
+/// Extracted for testability — the same logic is used in spawn_tmux_session.
+fn build_claude_args(config: &Config, ticket_key: &str) -> Vec<String> {
+    let mut elements: Vec<String> = Vec::new();
+
+    if config.worktree.enabled {
+        let branch = config.branch_for_ticket(ticket_key);
+        elements.push(shell_escape("--worktree"));
+        elements.push(shell_escape(&branch));
+    }
+
+    elements.push(shell_escape("-p"));
+    elements.push("\"Implement the plan in @$CDP_PLAN_FILE\"".to_string());
+
+    if !config.claude.extra_flags.is_empty() {
+        for flag in config.claude.extra_flags.split_whitespace() {
+            if !flag.starts_with('-') {
+                warn!(flag = %flag, "Skipping extra_flag that doesn't start with '-'");
+                continue;
+            }
+            elements.push(shell_escape(flag));
+        }
+    }
+
+    elements
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_config(extra_flags: &str, worktree_enabled: bool) -> Config {
+        let toml_str = format!(
+            r#"
+[jira]
+instance = "acme"
+email = "dev@acme.com"
+api_token = "token"
+jql = 'status = "In Progress"'
+
+[claude]
+home_dir = "~/.claude"
+extra_flags = "{extra_flags}"
+
+[paths]
+output_dir = "/tmp/tickets"
+repo_root = "/tmp/repo"
+
+[worktree]
+enabled = {worktree_enabled}
+
+[tmux]
+
+[spawner]
+"#,
+            extra_flags = extra_flags,
+            worktree_enabled = worktree_enabled,
+        );
+        toml::from_str(&toml_str).expect("parse test config")
+    }
+
+    // --- shell_escape ---
+
+    #[test]
+    fn test_shell_escape_simple_string() {
+        assert_eq!(shell_escape("hello"), "'hello'");
+    }
+
+    #[test]
+    fn test_shell_escape_with_spaces() {
+        assert_eq!(shell_escape("hello world"), "'hello world'");
+    }
+
+    #[test]
+    fn test_shell_escape_with_semicolon() {
+        // Semicolons inside single quotes are literal, not command separators
+        assert_eq!(shell_escape("; rm -rf /"), "'; rm -rf /'");
+    }
+
+    #[test]
+    fn test_shell_escape_with_dollar_sign() {
+        // $ inside single quotes is literal
+        assert_eq!(shell_escape("$(whoami)"), "'$(whoami)'");
+    }
+
+    #[test]
+    fn test_shell_escape_with_backticks() {
+        assert_eq!(shell_escape("`id`"), "'`id`'");
+    }
+
+    #[test]
+    fn test_shell_escape_with_double_quotes() {
+        assert_eq!(shell_escape("say \"hi\""), "'say \"hi\"'");
+    }
+
+    #[test]
+    fn test_shell_escape_with_single_quotes() {
+        // This is the tricky case: embedded single quotes must be escaped
+        assert_eq!(shell_escape("it's"), "'it'\\''s'");
+    }
+
+    #[test]
+    fn test_shell_escape_with_newline() {
+        assert_eq!(shell_escape("line1\nline2"), "'line1\nline2'");
+    }
+
+    #[test]
+    fn test_shell_escape_empty_string() {
+        assert_eq!(shell_escape(""), "''");
+    }
+
+    #[test]
+    fn test_shell_escape_pipe_and_redirect() {
+        assert_eq!(shell_escape("| cat > /etc/passwd"), "'| cat > /etc/passwd'");
+    }
+
+    // --- extra_flags validation ---
+
+    #[test]
+    fn test_extra_flags_valid_flags_only() {
+        let config = test_config("--verbose --debug", true);
+        let args = build_claude_args(&config, "PROJ-1");
+        assert!(args.contains(&"'--verbose'".to_string()));
+        assert!(args.contains(&"'--debug'".to_string()));
+    }
+
+    #[test]
+    fn test_extra_flags_rejects_non_flag_values() {
+        // "payload" doesn't start with '-' and should be silently dropped
+        let config = test_config("--verbose payload --debug", true);
+        let args = build_claude_args(&config, "PROJ-1");
+        assert!(args.contains(&"'--verbose'".to_string()));
+        assert!(args.contains(&"'--debug'".to_string()));
+        assert!(!args.contains(&"'payload'".to_string()));
+    }
+
+    #[test]
+    fn test_extra_flags_rejects_shell_injection() {
+        let config = test_config("; rm -rf /", true);
+        let args = build_claude_args(&config, "PROJ-1");
+        // ";" and "rm" and "-rf" and "/" — only "-rf" starts with '-'
+        // but even that is shell-escaped to "'-rf'"
+        assert!(!args.contains(&"';'".to_string()));
+        assert!(!args.contains(&"'rm'".to_string()));
+        assert!(!args.contains(&"'/'".to_string()));
+        // -rf would pass the starts_with('-') check but is still shell-escaped
+        assert!(args.contains(&"'-rf'".to_string()));
+    }
+
+    #[test]
+    fn test_extra_flags_empty() {
+        let config = test_config("", false);
+        let args = build_claude_args(&config, "PROJ-1");
+        // Only -p and the prompt reference
+        assert_eq!(args.len(), 2);
+    }
+
+    // --- wrapper script content: no hardcoded dynamic values ---
+
+    #[test]
+    fn test_script_uses_env_vars_not_interpolation() {
+        let config = test_config("--verbose", true);
+        let args = build_claude_args(&config, "PROJ-42");
+        let claude_args_str = args.join(" ");
+
+        // Simulate the same format!() used in spawn_tmux_session
+        let script_content = format!(
+            r#"#!/bin/bash
+set -uo pipefail
+cd "$CDP_REPO_ROOT" || exit 1
+export CLAUDE_HOME="$CDP_CLAUDE_HOME"
+claude {claude_args_str}
+"$CDP_BINARY" mark-done "$CDP_TICKET_KEY" --config "$CDP_CONFIG_PATH"
+"#,
+            claude_args_str = claude_args_str,
+        );
+
+        // The script must NOT contain any hardcoded paths or ticket keys.
+        // All dynamic values come from $CDP_* environment variables.
+        assert!(
+            !script_content.contains("PROJ-42"),
+            "ticket key should not be interpolated into script"
+        );
+        assert!(
+            !script_content.contains("/tmp/repo"),
+            "repo_root should not be interpolated into script"
+        );
+        assert!(
+            !script_content.contains("/tmp/tickets"),
+            "output_dir should not be interpolated into script"
+        );
+
+        // Verify the script references env vars instead
+        assert!(script_content.contains("$CDP_REPO_ROOT"));
+        assert!(script_content.contains("$CDP_CLAUDE_HOME"));
+        assert!(script_content.contains("$CDP_TICKET_KEY"));
+        assert!(script_content.contains("$CDP_BINARY"));
+        assert!(script_content.contains("$CDP_CONFIG_PATH"));
+        assert!(script_content.contains("$CDP_PLAN_FILE"));
+    }
+
+    #[test]
+    fn test_worktree_branch_is_shell_escaped() {
+        let config = test_config("", true);
+        let args = build_claude_args(&config, "PROJ-42");
+        // branch_prefix defaults to "feature", so branch = "feature/proj-42"
+        assert!(args.contains(&"'--worktree'".to_string()));
+        assert!(args.contains(&"'feature/proj-42'".to_string()));
+    }
+
+    #[test]
+    fn test_prompt_references_plan_file_via_at_path() {
+        let config = test_config("", false);
+        let args = build_claude_args(&config, "PROJ-1");
+        let joined = args.join(" ");
+        assert!(
+            joined.contains("@$CDP_PLAN_FILE"),
+            "prompt should reference plan file via @<path>: {joined}"
+        );
+    }
 }

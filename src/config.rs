@@ -300,4 +300,90 @@ repo_root = "~/projects/repo"
         let expanded = expand_path(path);
         assert_eq!(expanded, PathBuf::from(path));
     }
+
+    // --- Security: Debug output must not leak secrets ---
+
+    #[test]
+    fn test_jira_config_debug_redacts_api_token() {
+        let toml = r#"
+[jira]
+instance = "acme"
+email = "dev@acme.com"
+api_token = "super-secret-token-12345"
+jql = 'status = "In Progress"'
+
+[claude]
+home_dir = "~/.claude"
+
+[paths]
+output_dir = "/tmp/tickets"
+repo_root = "/tmp/repo"
+
+[worktree]
+
+[tmux]
+
+[spawner]
+"#;
+        let f = write_temp_toml(toml);
+        let cfg = Config::load(f.path()).expect("parse config");
+
+        let debug_output = format!("{:?}", cfg.jira);
+
+        assert!(
+            !debug_output.contains("super-secret-token-12345"),
+            "API token must not appear in Debug output, got: {}",
+            debug_output
+        );
+        assert!(
+            debug_output.contains("[REDACTED]"),
+            "Debug output should show [REDACTED] for api_token, got: {}",
+            debug_output
+        );
+        // Other fields should still be visible
+        assert!(
+            debug_output.contains("acme"),
+            "instance should be visible in Debug"
+        );
+        assert!(
+            debug_output.contains("dev@acme.com"),
+            "email should be visible in Debug"
+        );
+    }
+
+    #[test]
+    fn test_full_config_debug_redacts_api_token() {
+        let toml = r#"
+[jira]
+instance = "acme"
+email = "dev@acme.com"
+api_token = "my-secret-key-xyz"
+jql = 'status = "In Progress"'
+
+[claude]
+home_dir = "~/.claude"
+
+[paths]
+output_dir = "/tmp/tickets"
+repo_root = "/tmp/repo"
+
+[worktree]
+
+[tmux]
+
+[spawner]
+"#;
+        let f = write_temp_toml(toml);
+        let cfg = Config::load(f.path()).expect("parse config");
+
+        // When the full Config is debug-printed, the nested JiraConfig
+        // must still redact the token
+        let debug_output = format!("{:?}", cfg);
+
+        assert!(
+            !debug_output.contains("my-secret-key-xyz"),
+            "API token must not leak through Config Debug, got: {}",
+            debug_output
+        );
+    }
 }

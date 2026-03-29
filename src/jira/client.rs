@@ -254,4 +254,146 @@ mod tests {
         assert!(ticket.description_adf.is_none());
         assert!(ticket.subtasks.is_empty());
     }
+
+    // --- Security: client construction and credential handling ---
+
+    #[test]
+    fn test_client_construction_does_not_panic() {
+        // Ensures the reqwest::Client::builder() with timeouts builds successfully
+        let _client = JiraClient::new("https://test.atlassian.net", "user@test.com", "token123");
+    }
+
+    #[test]
+    fn test_auth_header_is_base64_basic_auth() {
+        let client = JiraClient::new(
+            "https://test.atlassian.net",
+            "user@test.com",
+            "secret-token",
+        );
+
+        // Verify it's a Basic auth header with properly encoded credentials
+        assert!(
+            client.auth_header.starts_with("Basic "),
+            "auth_header should start with 'Basic '"
+        );
+
+        // Decode and verify the credentials are correctly formatted
+        let encoded = client.auth_header.strip_prefix("Basic ").unwrap();
+        let decoded = String::from_utf8(
+            base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .expect("valid base64"),
+        )
+        .expect("valid utf8");
+        assert_eq!(decoded, "user@test.com:secret-token");
+    }
+
+    #[test]
+    fn test_auth_header_does_not_contain_plaintext_token() {
+        let client = JiraClient::new(
+            "https://test.atlassian.net",
+            "user@test.com",
+            "secret-token",
+        );
+
+        // The raw token should not appear unencoded in the auth header
+        assert!(
+            !client.auth_header.contains("secret-token"),
+            "plaintext token should not appear in auth_header"
+        );
+    }
+
+    // --- Security: resilient parsing of malicious API responses ---
+
+    #[test]
+    fn test_parse_issue_with_xss_in_summary() {
+        let issue = json!({
+            "key": "PROJ-99",
+            "fields": {
+                "summary": "<script>alert('xss')</script>",
+                "issuetype": { "name": "Bug" },
+                "priority": { "name": "High" },
+                "status": { "name": "Open" },
+                "labels": [],
+                "components": [],
+                "assignee": null,
+                "parent": null,
+                "description": null,
+                "subtasks": []
+            }
+        });
+
+        let ticket = parse_issue(&issue);
+        // The raw content is preserved — sanitization is the output layer's job,
+        // but critically, parsing must not panic or truncate.
+        assert_eq!(ticket.summary, "<script>alert('xss')</script>");
+    }
+
+    #[test]
+    fn test_parse_issue_with_shell_injection_in_key() {
+        let issue = json!({
+            "key": "$(rm -rf /)",
+            "fields": {
+                "summary": "evil",
+                "issuetype": null,
+                "priority": null,
+                "status": null,
+                "labels": [],
+                "components": [],
+                "assignee": null,
+                "parent": null,
+                "description": null,
+                "subtasks": []
+            }
+        });
+
+        let ticket = parse_issue(&issue);
+        // parse_issue stores the key as-is; validation happens upstream
+        assert_eq!(ticket.key, "$(rm -rf /)");
+    }
+
+    #[test]
+    fn test_parse_issue_with_deeply_nested_description() {
+        // Verify no stack overflow with moderately deep ADF nesting
+        let mut inner = json!({"type": "text", "text": "deep"});
+        for _ in 0..50 {
+            inner = json!({
+                "type": "paragraph",
+                "content": [inner]
+            });
+        }
+        let issue = json!({
+            "key": "PROJ-1",
+            "fields": {
+                "summary": "deep nesting",
+                "issuetype": null,
+                "priority": null,
+                "status": null,
+                "labels": [],
+                "components": [],
+                "assignee": null,
+                "parent": null,
+                "description": inner,
+                "subtasks": []
+            }
+        });
+
+        let ticket = parse_issue(&issue);
+        assert!(ticket.description_adf.is_some());
+    }
+
+    #[test]
+    fn test_parse_issue_with_missing_fields_does_not_panic() {
+        // A completely empty fields object — every field falls back to defaults
+        let issue = json!({
+            "key": "PROJ-1",
+            "fields": {}
+        });
+
+        let ticket = parse_issue(&issue);
+        assert_eq!(ticket.key, "PROJ-1");
+        assert_eq!(ticket.summary, "");
+        assert_eq!(ticket.issue_type, "Task");
+        assert_eq!(ticket.assignee, "Unassigned");
+    }
 }

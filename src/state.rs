@@ -307,4 +307,92 @@ mod tests {
 
         Ok(())
     }
+
+    // --- Security: database hardening ---
+
+    #[test]
+    fn test_wal_mode_enabled() -> Result<()> {
+        let db = StateDb::open_in_memory()?;
+        let mode: String = db
+            .conn
+            .query_row("PRAGMA journal_mode", [], |row| row.get(0))?;
+        // In-memory databases may report "memory" instead of "wal",
+        // so test with a file-based database for a definitive check.
+        // For in-memory, we just verify the pragma doesn't error.
+        assert!(
+            mode == "wal" || mode == "memory",
+            "journal_mode should be wal (or memory for in-memory db), got: {}",
+            mode
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_busy_timeout_is_set() -> Result<()> {
+        let db = StateDb::open_in_memory()?;
+        let timeout: i64 = db
+            .conn
+            .query_row("PRAGMA busy_timeout", [], |row| row.get(0))?;
+        assert_eq!(
+            timeout, 5000,
+            "busy_timeout should be 5000ms to handle concurrent access"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_wal_and_busy_timeout_on_file_db() -> Result<()> {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let db_path = dir.path().join("test.db");
+        let db = StateDb::open(&db_path)?;
+
+        let mode: String = db
+            .conn
+            .query_row("PRAGMA journal_mode", [], |row| row.get(0))?;
+        assert_eq!(mode, "wal", "file-backed db should use WAL mode");
+
+        let timeout: i64 = db
+            .conn
+            .query_row("PRAGMA busy_timeout", [], |row| row.get(0))?;
+        assert_eq!(timeout, 5000);
+
+        Ok(())
+    }
+
+    // --- Security: SQL injection resistance (parameterized queries) ---
+
+    #[test]
+    fn test_sql_injection_in_key_is_harmless() -> Result<()> {
+        let db = StateDb::open_in_memory()?;
+
+        // Attempt SQL injection via ticket key — should be treated as a literal string
+        let malicious_key = "'; DROP TABLE processed_tickets; --";
+        db.insert_synced(malicious_key, "injection attempt")?;
+
+        // Table should still exist and be functional
+        let known = db.is_known(malicious_key)?;
+        assert!(known, "malicious key should be stored as a literal string");
+
+        // Other operations should still work
+        db.insert_synced("PROJ-1", "normal ticket")?;
+        assert!(db.is_known("PROJ-1")?);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_sql_injection_in_summary_is_harmless() -> Result<()> {
+        let db = StateDb::open_in_memory()?;
+
+        let malicious_summary = "test'); DELETE FROM processed_tickets WHERE ('1'='1";
+        db.insert_synced("PROJ-1", malicious_summary)?;
+
+        let ticket = db.get_ticket("PROJ-1")?.expect("ticket should exist");
+        assert_eq!(
+            ticket.summary, malicious_summary,
+            "summary should be stored literally"
+        );
+
+        Ok(())
+    }
 }
