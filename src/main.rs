@@ -10,6 +10,26 @@ use std::path::PathBuf;
 use tracing::{error, info};
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
+/// Validates that a Jira ticket key matches the expected format (e.g., "PROJ-123").
+/// Prevents path traversal and shell injection via crafted ticket keys.
+pub fn validate_ticket_key(key: &str) -> bool {
+    // Jira keys: 1+ uppercase letters/digits (starting with a letter), hyphen, 1+ digits
+    let mut parts = key.splitn(2, '-');
+    let project = match parts.next() {
+        Some(p) if !p.is_empty() => p,
+        _ => return false,
+    };
+    let number = match parts.next() {
+        Some(n) if !n.is_empty() => n,
+        _ => return false,
+    };
+    project.starts_with(|c: char| c.is_ascii_uppercase())
+        && project
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+        && number.chars().all(|c| c.is_ascii_digit())
+}
+
 #[derive(Parser)]
 #[command(name = "claude-dispatch")]
 #[command(about = "Automated Jira-to-Claude Code implementation pipeline")]
@@ -73,6 +93,10 @@ async fn main() {
 
     match cli.command {
         Some(Commands::MarkDone { ticket_key }) => {
+            if !validate_ticket_key(&ticket_key) {
+                eprintln!("Invalid ticket key format: {}", ticket_key);
+                std::process::exit(1);
+            }
             handle_mark_done(&config, &ticket_key);
         }
         None => {

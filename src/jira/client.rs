@@ -33,8 +33,13 @@ impl JiraClient {
         let credentials =
             base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", email, api_token));
         let auth_header = format!("Basic {}", credentials);
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .build()
+            .expect("failed to build HTTP client");
         Self {
-            client: reqwest::Client::new(),
+            client,
             base_url: base_url.to_string(),
             auth_header,
         }

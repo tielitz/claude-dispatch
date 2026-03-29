@@ -49,7 +49,7 @@ pub struct Config {
     pub spawner: SpawnerConfig,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Deserialize, Clone)]
 pub struct JiraConfig {
     pub instance: String,
     pub email: String,
@@ -59,6 +59,19 @@ pub struct JiraConfig {
     #[serde(default = "default_fetch_limit")]
     pub fetch_limit: u32,
     pub jql: String,
+}
+
+impl std::fmt::Debug for JiraConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("JiraConfig")
+            .field("instance", &self.instance)
+            .field("email", &self.email)
+            .field("api_token", &"[REDACTED]")
+            .field("poll_interval_secs", &self.poll_interval_secs)
+            .field("fetch_limit", &self.fetch_limit)
+            .field("jql", &self.jql)
+            .finish()
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]

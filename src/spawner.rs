@@ -7,6 +7,7 @@ use tracing::{error, info, warn};
 
 use crate::config::Config;
 use crate::state::StateDb;
+use crate::validate_ticket_key;
 
 /// Main loop: sleep, then poll for planned tickets, forever.
 pub async fn run_spawner_loop(
@@ -35,6 +36,11 @@ async fn spawn_planned_tickets(
     let pid = std::process::id() as i64;
 
     for ticket in tickets {
+        if !validate_ticket_key(&ticket.key) {
+            error!(key = %ticket.key, "ticket key failed validation, skipping");
+            continue;
+        }
+
         let plan_file = match &ticket.plan_file {
             Some(p) => p.clone(),
             None => {
@@ -92,79 +98,82 @@ async fn spawn_tmux_session(
         .map(|p| p.display().to_string())
         .unwrap_or_default();
 
-    // --- Build claude invocation ---
-    // Always: claude -p "$PROMPT"
-    // Optionally: --worktree <branch_prefix>/<ticket_key>
-    // Optionally: extra_flags
-    let mut claude_args = String::new();
+    // --- Build claude arguments as a shell array ---
+    // Using a bash array avoids injection via extra_flags or worktree branch names.
+    let mut claude_array_elements: Vec<String> = Vec::new();
 
     if config.worktree.enabled {
-        let branch = format!("{}/{}", config.worktree.branch_prefix, ticket_key);
-        claude_args.push_str(&format!("--worktree {} ", branch));
+        let branch = config.branch_for_ticket(ticket_key);
+        claude_array_elements.push(shell_escape("--worktree"));
+        claude_array_elements.push(shell_escape(&branch));
     }
 
-    claude_args.push_str("-p \"$PROMPT\"");
+    claude_array_elements.push(shell_escape("-p"));
+    claude_array_elements.push("\"$PROMPT\"".to_string()); // $PROMPT is set from file content
 
+    // Parse extra_flags into individual arguments and validate each one
     if !config.claude.extra_flags.is_empty() {
-        claude_args.push(' ');
-        claude_args.push_str(&config.claude.extra_flags);
+        for flag in config.claude.extra_flags.split_whitespace() {
+            if !flag.starts_with('-') {
+                warn!(flag = %flag, "Skipping extra_flag that doesn't start with '-'");
+                continue;
+            }
+            claude_array_elements.push(shell_escape(flag));
+        }
     }
+
+    let claude_args_str = claude_array_elements.join(" ");
 
     // --- Write wrapper script ---
+    // All dynamic values are passed via environment variables set by tmux,
+    // avoiding shell metacharacter injection from interpolated strings.
     let script_path = state_dir.join(format!("run-{}.sh", ticket_key));
 
+    // The script reads all dynamic values from environment variables that are
+    // set when tmux launches the script (see spawn_tmux_session below).
     let script_content = format!(
         r#"#!/bin/bash
 set -uo pipefail
 
-TICKET_KEY="{ticket_key}"
-REPO_ROOT="{repo_root}"
-CLAUDE_HOME_DIR="{claude_home}"
-BINARY="{binary}"
-PLAN_FILE="{plan_file}"
-CONFIG_PATH="{config_path}"
+# All dynamic values are passed via environment variables to avoid shell injection.
+# See the tmux invocation that sets: CDP_TICKET_KEY, CDP_REPO_ROOT, etc.
 
-cd "$REPO_ROOT"
-export CLAUDE_HOME="$CLAUDE_HOME_DIR"
+cd "$CDP_REPO_ROOT" || exit 1
+export CLAUDE_HOME="$CDP_CLAUDE_HOME"
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  Dev Pipeline — $TICKET_KEY"
-echo "  Plan file: $PLAN_FILE"
+echo "  Dev Pipeline — $CDP_TICKET_KEY"
+echo "  Plan file: $CDP_PLAN_FILE"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-PROMPT=$(cat "$PLAN_FILE")
+PROMPT=$(cat "$CDP_PLAN_FILE")
 
-claude {claude_args}
+claude {claude_args_str}
 EXIT_CODE=$?
 
 if [ $EXIT_CODE -eq 0 ]; then
     echo ""
-    echo "Session completed successfully for $TICKET_KEY"
+    echo "Session completed successfully for $CDP_TICKET_KEY"
 else
     echo ""
-    echo "Session failed for $TICKET_KEY (exit code: $EXIT_CODE)"
+    echo "Session failed for $CDP_TICKET_KEY (exit code: $EXIT_CODE)"
 fi
 
-"$BINARY" mark-done "$TICKET_KEY" --config "$CONFIG_PATH"
+"$CDP_BINARY" mark-done "$CDP_TICKET_KEY" --config "$CDP_CONFIG_PATH"
 
 echo ""
 echo "Session ended. Press Enter to close this pane."
 read -r
 "#,
-        ticket_key = ticket_key,
-        repo_root = repo_root.display(),
-        claude_home = claude_home.display(),
-        binary = current_exe.display(),
-        plan_file = plan_file,
-        config_path = config_path,
-        claude_args = claude_args,
+        claude_args_str = claude_args_str,
     );
 
     // Ensure state dir exists.
     fs::create_dir_all(&state_dir)?;
     fs::write(&script_path, &script_content)?;
-    fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755))?;
+    // 0o700: only the owning user can read/write/execute the wrapper script
+    fs::set_permissions(&script_path, fs::Permissions::from_mode(0o700))?;
 
     info!(script = %script_path.display(), "wrapper script written");
 
@@ -180,19 +189,31 @@ read -r
 
     let script_path_str = script_path.to_string_lossy().into_owned();
 
+    // Build environment variables to pass dynamic values safely to the script.
+    let env_vars = [
+        ("CDP_TICKET_KEY", ticket_key.to_string()),
+        ("CDP_REPO_ROOT", repo_root.display().to_string()),
+        ("CDP_CLAUDE_HOME", claude_home.display().to_string()),
+        ("CDP_BINARY", current_exe.display().to_string()),
+        ("CDP_PLAN_FILE", plan_file.to_string()),
+        ("CDP_CONFIG_PATH", config_path.clone()),
+    ];
+
     if session_exists {
         // Add a new window to the existing session.
-        let status = Command::new("tmux")
-            .args([
-                "new-window",
-                "-t",
-                session_name,
-                "-n",
-                ticket_key,
-                &script_path_str,
-            ])
-            .status()
-            .await?;
+        let mut cmd = Command::new("tmux");
+        cmd.args([
+            "new-window",
+            "-t",
+            session_name,
+            "-n",
+            ticket_key,
+            &script_path_str,
+        ]);
+        for (k, v) in &env_vars {
+            cmd.env(k, v);
+        }
+        let status = cmd.status().await?;
 
         if !status.success() {
             return Err(format!(
@@ -204,18 +225,20 @@ read -r
         }
     } else {
         // Create a brand-new detached session.
-        let status = Command::new("tmux")
-            .args([
-                "new-session",
-                "-d",
-                "-s",
-                session_name,
-                "-n",
-                ticket_key,
-                &script_path_str,
-            ])
-            .status()
-            .await?;
+        let mut cmd = Command::new("tmux");
+        cmd.args([
+            "new-session",
+            "-d",
+            "-s",
+            session_name,
+            "-n",
+            ticket_key,
+            &script_path_str,
+        ]);
+        for (k, v) in &env_vars {
+            cmd.env(k, v);
+        }
+        let status = cmd.status().await?;
 
         if !status.success() {
             return Err(format!(
@@ -228,4 +251,10 @@ read -r
     }
 
     Ok(())
+}
+
+/// Shell-escape a string by wrapping it in single quotes.
+/// Any embedded single quotes are replaced with `'\''` (end quote, escaped quote, start quote).
+fn shell_escape(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
 }

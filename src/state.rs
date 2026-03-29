@@ -24,7 +24,7 @@ pub struct StateDb {
 impl StateDb {
     pub fn open(path: &Path) -> Result<Self> {
         let conn = Connection::open(path)?;
-        conn.execute_batch("PRAGMA journal_mode=WAL;")?;
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
         let db = Self { conn };
         db.init()?;
         Ok(db)
