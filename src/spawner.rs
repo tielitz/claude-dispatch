@@ -108,8 +108,10 @@ async fn spawn_tmux_session(
         claude_array_elements.push(shell_escape(&branch));
     }
 
+    // The prompt references the plan file via @<path> so Claude reads it directly.
+    // This avoids loading file content into a shell variable (ARG_MAX, metacharacters).
     claude_array_elements.push(shell_escape("-p"));
-    claude_array_elements.push("\"$PROMPT\"".to_string()); // $PROMPT is set from file content
+    claude_array_elements.push("\"Implement the plan in @$CDP_PLAN_FILE\"".to_string());
 
     // Parse extra_flags into individual arguments and validate each one
     if !config.claude.extra_flags.is_empty() {
@@ -147,8 +149,8 @@ echo "  Plan file: $CDP_PLAN_FILE"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-PROMPT=$(cat "$CDP_PLAN_FILE")
-
+# Plan file is referenced via @<path> in the prompt — Claude reads it directly.
+# This avoids loading file content into a shell variable (ARG_MAX, metacharacters).
 claude {claude_args_str}
 EXIT_CODE=$?
 
