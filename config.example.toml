@@ -1,0 +1,29 @@
+[jira]
+instance = "mycompany"
+email = "you@company.com"
+api_token = "your-api-token"
+poll_interval_secs = 60
+fetch_limit = 5
+jql = 'assignee = currentUser() AND status = "In Progress"'
+
+[claude]
+home_dir = "~/.claude-dispatch"
+extra_flags = ""
+plan_prompt_template = ""
+
+[paths]
+output_dir = "~/.dev-pipeline/tickets"
+repo_root = "~/projects/my-service"
+state_dir = "~/.dev-pipeline"
+log_dir = "~/.dev-pipeline/logs"
+
+[worktree]
+enabled = true
+branch_prefix = "feature"
+base_branch = "main"
+
+[tmux]
+session_name = "dev-pipeline"
+
+[spawner]
+poll_interval_secs = 10
