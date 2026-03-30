@@ -62,6 +62,13 @@ async fn main() {
                 eprintln!("tmux new-session failed (exit: {:?})", status.code());
                 std::process::exit(1);
             }
+
+            // Enable mouse support (scrolling, pane selection)
+            let _ = std::process::Command::new("tmux")
+                .args(["set-option", "-t", session_name, "mouse", "on"])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
         }
 
         // Attach to the session (blocks until user detaches or session ends)
