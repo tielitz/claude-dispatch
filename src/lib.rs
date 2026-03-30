@@ -38,6 +38,10 @@ pub struct Cli {
     #[arg(long, default_value = "config.toml")]
     pub config: PathBuf,
 
+    /// Stream planner Claude output to the terminal
+    #[arg(long)]
+    pub debug: bool,
+
     #[command(subcommand)]
     pub command: Option<Commands>,
 }
@@ -118,7 +122,8 @@ pub async fn run_pipeline(config: config::Config) {
 pub fn setup_tracing(config: &config::Config) {
     let log_dir = config.log_dir();
 
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&config.log_level));
 
     let stderr_layer = fmt::layer().with_ansi(true);
 

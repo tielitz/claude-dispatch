@@ -6,13 +6,14 @@ async fn main() {
     let cli = Cli::parse();
 
     // Load config
-    let config = match claude_dispatch::config::Config::load(&cli.config) {
+    let mut config = match claude_dispatch::config::Config::load(&cli.config) {
         Ok(cfg) => cfg,
         Err(e) => {
             eprintln!("Failed to load config from {}: {}", cli.config.display(), e);
             std::process::exit(1);
         }
     };
+    config.debug = cli.debug;
 
     // Create directories
     let state_dir = config.state_dir();

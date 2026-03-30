@@ -37,10 +37,18 @@ fn default_spawner_poll() -> u64 {
     10
 }
 
+fn default_log_level() -> String {
+    "info".to_string()
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
     #[serde(skip)]
     pub config_path: Option<PathBuf>,
+    #[serde(skip)]
+    pub debug: bool,
+    #[serde(default = "default_log_level")]
+    pub log_level: String,
     pub jira: JiraConfig,
     pub claude: ClaudeConfig,
     pub paths: PathsConfig,
@@ -168,7 +176,11 @@ impl Config {
 
     /// Base URL for the Jira instance (e.g. `https://mycompany.atlassian.net`).
     pub fn jira_base_url(&self) -> String {
-        format!("https://{}.atlassian.net", self.jira.instance)
+        if self.jira.instance.starts_with("https://") || self.jira.instance.starts_with("http://") {
+            self.jira.instance.trim_end_matches('/').to_string()
+        } else {
+            format!("https://{}.atlassian.net", self.jira.instance)
+        }
     }
 
     /// Git branch name for a given Jira ticket key.
