@@ -103,7 +103,7 @@ async fn spawn_tmux_session(
     // --- Write wrapper script ---
     // All dynamic values are passed via environment variables set by tmux,
     // avoiding shell metacharacter injection from interpolated strings.
-    let script_path = state_dir.join(format!("run-{}.sh", ticket_key));
+    let script_path = state_dir.join(format!("run-{ticket_key}.sh"));
 
     // The script reads all dynamic values from environment variables that are
     // set when tmux launches the script (see spawn_tmux_session below).
@@ -115,7 +115,7 @@ set -uo pipefail
 # See the tmux invocation that sets: CDP_TICKET_KEY, CDP_REPO_ROOT, etc.
 
 cd "$CDP_REPO_ROOT" || exit 1
-export CLAUDE_HOME="$CDP_CLAUDE_HOME"
+export CLAUDE_CONFIG_DIR="$CDP_CLAUDE_HOME"
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  Dev Pipeline — $CDP_TICKET_KEY"
@@ -142,7 +142,6 @@ echo ""
 echo "Session ended. Press Enter to close this pane."
 read -r
 "#,
-        claude_args_str = claude_args_str,
     );
 
     // Ensure state dir exists.
@@ -405,7 +404,7 @@ enabled = {worktree_enabled}
             r#"#!/bin/bash
 set -uo pipefail
 cd "$CDP_REPO_ROOT" || exit 1
-export CLAUDE_HOME="$CDP_CLAUDE_HOME"
+export CLAUDE_CONFIG_DIR="$CDP_CLAUDE_HOME"
 claude {claude_args_str}
 "$CDP_BINARY" mark-done "$CDP_TICKET_KEY" --config "$CDP_CONFIG_PATH"
 "#,
