@@ -210,10 +210,6 @@ fn shell_escape(s: &str) -> String {
 fn build_claude_args(config: &Config, ticket_key: &str) -> Vec<String> {
     let mut elements: Vec<String> = Vec::new();
 
-    // Start in plan mode so Claude reviews the plan before executing.
-    elements.push(shell_escape("--permission-mode"));
-    elements.push(shell_escape("plan"));
-
     if config.worktree.enabled {
         let branch = config.branch_for_ticket(ticket_key);
         elements.push(shell_escape("--worktree"));
@@ -361,10 +357,8 @@ enabled = {worktree_enabled}
     fn test_extra_flags_empty() {
         let config = test_config("", false);
         let args = build_claude_args(&config, "PROJ-1");
-        // --permission-mode plan + prompt reference
-        assert_eq!(args.len(), 3);
-        assert_eq!(args[0], "'--permission-mode'");
-        assert_eq!(args[1], "'plan'");
+        // Only the prompt reference
+        assert_eq!(args.len(), 1);
     }
 
     // --- wrapper script content: no hardcoded dynamic values ---
