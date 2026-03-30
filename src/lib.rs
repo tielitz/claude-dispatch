@@ -84,7 +84,7 @@ pub fn handle_mark_done(config: &config::Config, ticket_key: &str) {
 pub async fn run_pipeline(config: config::Config) {
     info!(
         jira_instance = %config.jira.instance,
-        poll_interval_secs = config.jira.poll_interval_secs,
+        cron_schedule = %config.jira.cron_schedule,
         output_dir = %config.output_dir().display(),
         state_dir = %config.state_dir().display(),
         "Starting claude-dispatch pipeline"

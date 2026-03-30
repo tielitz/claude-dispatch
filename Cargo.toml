@@ -16,6 +16,7 @@ tracing-appender = "0.2"
 clap = { version = "4", features = ["derive"] }
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
+cron = "0.15"
 dirs = "6"
 
 [dev-dependencies]
