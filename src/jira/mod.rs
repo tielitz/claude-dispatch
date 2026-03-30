@@ -36,8 +36,12 @@ pub async fn run_sync_loop(config: Config) -> Result<(), Box<dyn std::error::Err
     let output_dir = config.output_dir();
     std::fs::create_dir_all(&output_dir)?;
 
-    let schedule = cron::Schedule::from_str(&config.jira.cron_schedule)
-        .map_err(|e| format!("invalid cron_schedule '{}': {}", config.jira.cron_schedule, e))?;
+    let schedule = cron::Schedule::from_str(&config.jira.cron_schedule).map_err(|e| {
+        format!(
+            "invalid cron_schedule '{}': {}",
+            config.jira.cron_schedule, e
+        )
+    })?;
 
     info!(
         jql = %config.jira.jql,
