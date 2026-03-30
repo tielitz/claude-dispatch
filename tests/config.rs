@@ -125,6 +125,89 @@ fn test_expand_path_absolute() {
     assert_eq!(expanded, PathBuf::from(path));
 }
 
+// --- jira_base_url: supports both short name and full URL ---
+
+#[test]
+fn test_jira_base_url_from_short_name() {
+    let toml = r#"
+[jira]
+instance = "acme"
+email = "dev@acme.com"
+api_token = "token"
+jql = 'status = "In Progress"'
+
+[claude]
+home_dir = "~/.claude"
+
+[paths]
+output_dir = "/tmp/tickets"
+repo_root = "/tmp/repo"
+
+[worktree]
+
+[tmux]
+
+[spawner]
+"#;
+    let f = write_temp_toml(toml);
+    let cfg = Config::load(f.path()).expect("parse config");
+    assert_eq!(cfg.jira_base_url(), "https://acme.atlassian.net");
+}
+
+#[test]
+fn test_jira_base_url_from_full_url() {
+    let toml = r#"
+[jira]
+instance = "https://mercedes-benz.atlassian.net"
+email = "dev@acme.com"
+api_token = "token"
+jql = 'status = "In Progress"'
+
+[claude]
+home_dir = "~/.claude"
+
+[paths]
+output_dir = "/tmp/tickets"
+repo_root = "/tmp/repo"
+
+[worktree]
+
+[tmux]
+
+[spawner]
+"#;
+    let f = write_temp_toml(toml);
+    let cfg = Config::load(f.path()).expect("parse config");
+    assert_eq!(cfg.jira_base_url(), "https://mercedes-benz.atlassian.net");
+}
+
+#[test]
+fn test_jira_base_url_strips_trailing_slash() {
+    let toml = r#"
+[jira]
+instance = "https://example.atlassian.net/"
+email = "dev@acme.com"
+api_token = "token"
+jql = 'status = "In Progress"'
+
+[claude]
+home_dir = "~/.claude"
+
+[paths]
+output_dir = "/tmp/tickets"
+repo_root = "/tmp/repo"
+
+[worktree]
+
+[tmux]
+
+[spawner]
+"#;
+    let f = write_temp_toml(toml);
+    let cfg = Config::load(f.path()).expect("parse config");
+    assert_eq!(cfg.jira_base_url(), "https://example.atlassian.net");
+}
+
 // --- Security: Debug output must not leak secrets ---
 
 #[test]

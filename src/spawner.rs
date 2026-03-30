@@ -1,6 +1,5 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-use std::process::Stdio;
 
 use tokio::process::Command;
 use tracing::{error, info, warn};
@@ -136,11 +135,11 @@ else
     echo "Session failed for $CDP_TICKET_KEY (exit code: $EXIT_CODE)"
 fi
 
-"$CDP_BINARY" mark-done "$CDP_TICKET_KEY" --config "$CDP_CONFIG_PATH"
+"$CDP_BINARY" --config "$CDP_CONFIG_PATH" mark-done "$CDP_TICKET_KEY"
 
 echo ""
-echo "Session ended. Press Enter to close this pane."
-read -r
+echo "Closing in 10 seconds..."
+sleep 10
 "#,
     );
 
@@ -152,16 +151,8 @@ read -r
 
     info!(script = %script_path.display(), "wrapper script written");
 
-    // --- Tmux: check if session already exists ---
+    // --- Tmux: split a new pane in the self-hosted session ---
     let session_name = &config.tmux.session_name;
-    let session_exists = Command::new("tmux")
-        .args(["has-session", "-t", session_name])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .await?
-        .success();
-
     let script_path_str = script_path.to_string_lossy().into_owned();
 
     // Build environment variables to pass dynamic values safely to the script.
@@ -174,55 +165,35 @@ read -r
         ("CDP_CONFIG_PATH", config_path.clone()),
     ];
 
-    if session_exists {
-        // Add a new window to the existing session.
-        let mut cmd = Command::new("tmux");
-        cmd.args([
-            "new-window",
-            "-t",
-            session_name,
-            "-n",
-            ticket_key,
-            &script_path_str,
-        ]);
-        for (k, v) in &env_vars {
-            cmd.env(k, v);
-        }
-        let status = cmd.status().await?;
+    // Split a new pane in the existing session for this agent.
+    // Environment variables must be passed via tmux's -e flag, not .env(),
+    // because .env() only sets vars on the tmux client process — the tmux
+    // server spawns the pane command using the session environment instead.
+    let mut cmd = Command::new("tmux");
+    cmd.args(["split-window", "-t", session_name]);
+    for (k, v) in &env_vars {
+        cmd.args(["-e", &format!("{k}={v}")]);
+    }
+    cmd.arg(&script_path_str);
+    let status = cmd.status().await?;
 
-        if !status.success() {
-            return Err(format!(
-                "tmux new-window failed for ticket {} (exit: {:?})",
-                ticket_key,
-                status.code()
-            )
-            .into());
-        }
-    } else {
-        // Create a brand-new detached session.
-        let mut cmd = Command::new("tmux");
-        cmd.args([
-            "new-session",
-            "-d",
-            "-s",
-            session_name,
-            "-n",
+    if !status.success() {
+        return Err(format!(
+            "tmux split-window failed for ticket {} (exit: {:?})",
             ticket_key,
-            &script_path_str,
-        ]);
-        for (k, v) in &env_vars {
-            cmd.env(k, v);
-        }
-        let status = cmd.status().await?;
+            status.code()
+        )
+        .into());
+    }
 
-        if !status.success() {
-            return Err(format!(
-                "tmux new-session failed for ticket {} (exit: {:?})",
-                ticket_key,
-                status.code()
-            )
-            .into());
-        }
+    // Rebalance all panes into a tiled grid layout.
+    let rebalance = Command::new("tmux")
+        .args(["select-layout", "-t", session_name, "tiled"])
+        .status()
+        .await?;
+
+    if !rebalance.success() {
+        warn!(key = %ticket_key, "tmux select-layout tiled failed, panes may be uneven");
     }
 
     Ok(())
@@ -239,13 +210,16 @@ fn shell_escape(s: &str) -> String {
 fn build_claude_args(config: &Config, ticket_key: &str) -> Vec<String> {
     let mut elements: Vec<String> = Vec::new();
 
+    // Start in plan mode so Claude reviews the plan before executing.
+    elements.push(shell_escape("--permission-mode"));
+    elements.push(shell_escape("plan"));
+
     if config.worktree.enabled {
         let branch = config.branch_for_ticket(ticket_key);
         elements.push(shell_escape("--worktree"));
         elements.push(shell_escape(&branch));
     }
 
-    elements.push(shell_escape("-p"));
     elements.push("\"Implement the plan in @$CDP_PLAN_FILE\"".to_string());
 
     if !config.claude.extra_flags.is_empty() {
@@ -387,8 +361,10 @@ enabled = {worktree_enabled}
     fn test_extra_flags_empty() {
         let config = test_config("", false);
         let args = build_claude_args(&config, "PROJ-1");
-        // Only -p and the prompt reference
-        assert_eq!(args.len(), 2);
+        // --permission-mode plan + prompt reference
+        assert_eq!(args.len(), 3);
+        assert_eq!(args[0], "'--permission-mode'");
+        assert_eq!(args[1], "'plan'");
     }
 
     // --- wrapper script content: no hardcoded dynamic values ---
@@ -406,7 +382,7 @@ set -uo pipefail
 cd "$CDP_REPO_ROOT" || exit 1
 export CLAUDE_CONFIG_DIR="$CDP_CLAUDE_HOME"
 claude {claude_args_str}
-"$CDP_BINARY" mark-done "$CDP_TICKET_KEY" --config "$CDP_CONFIG_PATH"
+"$CDP_BINARY" --config "$CDP_CONFIG_PATH" mark-done "$CDP_TICKET_KEY"
 "#,
             claude_args_str = claude_args_str,
         );

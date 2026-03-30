@@ -72,7 +72,7 @@ pub fn handle_mark_done(config: &config::Config, ticket_key: &str) {
     info!(key = %ticket_key, "{} session closed, marked as done", ticket_key);
 
     // Clean up wrapper script
-    let script_path = config.state_dir().join(format!("run-{}.sh", ticket_key));
+    let script_path = config.state_dir().join(format!("run-{ticket_key}.sh"));
     if script_path.exists()
         && let Err(e) = std::fs::remove_file(&script_path)
     {

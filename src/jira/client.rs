@@ -1,5 +1,6 @@
 use base64::Engine as _;
 use serde_json::Value;
+use tracing::debug;
 
 pub struct JiraClient {
     client: reqwest::Client,
@@ -31,8 +32,8 @@ pub struct SubtaskInfo {
 impl JiraClient {
     pub fn new(base_url: &str, email: &str, api_token: &str) -> Self {
         let credentials =
-            base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", email, api_token));
-        let auth_header = format!("Basic {}", credentials);
+            base64::engine::general_purpose::STANDARD.encode(format!("{email}:{api_token}"));
+        let auth_header = format!("Basic {credentials}");
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .connect_timeout(std::time::Duration::from_secs(10))
@@ -50,7 +51,7 @@ impl JiraClient {
         jql: &str,
         max_results: u32,
     ) -> Result<Vec<JiraTicket>, Box<dyn std::error::Error + Send + Sync>> {
-        let url = format!("{}/rest/api/3/search", self.base_url);
+        let url = format!("{}/rest/api/3/search/jql", self.base_url);
         let response = self
             .client
             .get(&url)
@@ -59,11 +60,6 @@ impl JiraClient {
             .query(&[
                 ("jql", jql.to_string()),
                 ("maxResults", max_results.to_string()),
-                (
-                    "fields",
-                    "summary,description,issuetype,priority,status,labels,components,assignee,parent,subtasks"
-                        .to_string(),
-                ),
             ])
             .send()
             .await?;
@@ -71,13 +67,55 @@ impl JiraClient {
         let status = response.status();
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
-            return Err(format!("Jira API error {}: {}", status, body).into());
+            return Err(format!("Jira API error {status}: {body}").into());
         }
 
         let data: Value = response.json().await?;
-        let issues = data["issues"].as_array().cloned().unwrap_or_default();
-        let tickets = issues.iter().map(parse_issue).collect();
+        debug!(response = %data, "GET {}", url);
+        let issue_ids: Vec<String> = data["issues"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|issue| issue["id"].as_str().map(|s| s.to_string()))
+            .collect();
+
+        let mut tickets = Vec::with_capacity(issue_ids.len());
+        for id in &issue_ids {
+            match self.get_issue(id).await {
+                Ok(ticket) => tickets.push(ticket),
+                Err(e) => {
+                    tracing::error!(issue_id = %id, error = %e, "Failed to fetch issue {}", id);
+                }
+            }
+        }
         Ok(tickets)
+    }
+
+    async fn get_issue(
+        &self,
+        issue_id: &str,
+    ) -> Result<JiraTicket, Box<dyn std::error::Error + Send + Sync>> {
+        let url = format!("{}/rest/api/3/issue/{}", self.base_url, issue_id);
+        let fields = "summary,description,issuetype,priority,status,labels,components,assignee,parent,subtasks";
+        let response = self
+            .client
+            .get(&url)
+            .header("Authorization", &self.auth_header)
+            .header("Content-Type", "application/json")
+            .query(&[("fields", fields)])
+            .send()
+            .await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(format!("Jira API error {status} for issue {issue_id}: {body}").into());
+        }
+
+        let issue: Value = response.json().await?;
+        debug!(response = %issue, "GET {}", url);
+        Ok(parse_issue(&issue))
     }
 }
 
