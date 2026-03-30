@@ -1,5 +1,6 @@
 use crate::config::{Config, expand_path};
 use crate::jira::client::JiraTicket;
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tracing::{error, info};
 
 const DEFAULT_PLAN_PROMPT: &str = r#"You are drafting an implementation plan for a Jira ticket. Read the repository's CLAUDE.md and explore the codebase to understand existing patterns and architecture.
@@ -67,6 +68,27 @@ fn render_prompt(
     Ok(rendered)
 }
 
+/// Reads all lines from `reader`, writes each line to `mirror` prefixed with
+/// "[planner] ", and returns the full collected output.
+async fn collect_and_mirror<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
+    reader: BufReader<R>,
+    mirror: &mut W,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let mut lines = reader.lines();
+    let mut collected = String::new();
+
+    while let Some(line) = lines.next_line().await? {
+        collected.push_str(&line);
+        collected.push('\n');
+        mirror.write_all(b"[planner] ").await?;
+        mirror.write_all(line.as_bytes()).await?;
+        mirror.write_all(b"\n").await?;
+        mirror.flush().await?;
+    }
+
+    Ok(collected)
+}
+
 /// Runs a headless Claude Code session to draft an implementation plan for the
 /// given Jira ticket.
 pub async fn draft_plan(
@@ -85,30 +107,66 @@ pub async fn draft_plan(
         "Drafting implementation plan with headless Claude"
     );
 
-    let output = tokio::process::Command::new("claude")
-        .arg("--print")
-        .arg("-p")
-        .arg(&prompt)
-        .current_dir(&repo_root)
-        .env("CLAUDE_HOME", &claude_home)
-        .output()
-        .await
-        .map_err(|e| format!("Failed to spawn claude process: {}", e))?;
+    if config.debug {
+        let mut child = tokio::process::Command::new("claude")
+            .arg("--print")
+            .arg("-p")
+            .arg(&prompt)
+            .current_dir(&repo_root)
+            .env("CLAUDE_CONFIG_DIR", &claude_home)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::inherit())
+            .spawn()
+            .map_err(|e| format!("Failed to spawn claude process: {e}"))?;
 
-    if output.status.success() {
-        let plan = String::from_utf8_lossy(&output.stdout).into_owned();
-        info!(ticket_key = %ticket.key, "Plan drafted successfully");
-        Ok(plan)
+        let stdout = child.stdout.take().expect("stdout was piped");
+        let reader = BufReader::new(stdout);
+        let mut stderr_handle = tokio::io::stderr();
+        let plan = collect_and_mirror(reader, &mut stderr_handle).await?;
+
+        let status = child
+            .wait()
+            .await
+            .map_err(|e| format!("Failed to wait on claude process: {e}"))?;
+
+        if status.success() {
+            info!(ticket_key = %ticket.key, "Plan drafted successfully");
+            Ok(plan)
+        } else {
+            let exit_code = status.code().unwrap_or(-1);
+            error!(
+                ticket_key = %ticket.key,
+                exit_code = exit_code,
+                "Claude process failed"
+            );
+            Err(format!("claude exited with code {exit_code}").into())
+        }
     } else {
-        let exit_code = output.status.code().unwrap_or(-1);
-        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-        error!(
-            ticket_key = %ticket.key,
-            exit_code = exit_code,
-            stderr = %stderr,
-            "Claude process failed"
-        );
-        Err(format!("claude exited with code {}: {}", exit_code, stderr).into())
+        let output = tokio::process::Command::new("claude")
+            .arg("--print")
+            .arg("-p")
+            .arg(&prompt)
+            .current_dir(&repo_root)
+            .env("CLAUDE_CONFIG_DIR", &claude_home)
+            .output()
+            .await
+            .map_err(|e| format!("Failed to spawn claude process: {e}"))?;
+
+        if output.status.success() {
+            let plan = String::from_utf8_lossy(&output.stdout).into_owned();
+            info!(ticket_key = %ticket.key, "Plan drafted successfully");
+            Ok(plan)
+        } else {
+            let exit_code = output.status.code().unwrap_or(-1);
+            let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+            error!(
+                ticket_key = %ticket.key,
+                exit_code = exit_code,
+                stderr = %stderr,
+                "Claude process failed"
+            );
+            Err(format!("claude exited with code {exit_code}: {stderr}").into())
+        }
     }
 }
 
@@ -219,5 +277,23 @@ repo_root = "/tmp/repo"
             template.contains("{{TICKET_KEY}}"),
             "default template should contain {{TICKET_KEY}} placeholder"
         );
+    }
+
+    #[tokio::test]
+    async fn test_collect_and_mirror_captures_all_lines() {
+        let input = "line one\nline two\nline three\n";
+        let cursor = std::io::Cursor::new(input.as_bytes().to_vec());
+        let reader = tokio::io::BufReader::new(cursor);
+
+        let mut mirrored = Vec::new();
+        let result = super::collect_and_mirror(reader, &mut mirrored)
+            .await
+            .unwrap();
+
+        assert_eq!(result, "line one\nline two\nline three\n");
+        let mirrored_str = String::from_utf8(mirrored).unwrap();
+        assert!(mirrored_str.contains("line one"));
+        assert!(mirrored_str.contains("line two"));
+        assert!(mirrored_str.contains("line three"));
     }
 }
