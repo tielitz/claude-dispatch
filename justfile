@@ -29,5 +29,8 @@ check:
 fmt:
     cargo fmt
 
+attach:
+    tmux attach -t "$(grep 'session_name' config.toml | head -1 | sed 's/.*= *"\(.*\)"/\1/')"
+
 clean:
     cargo clean
