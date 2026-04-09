@@ -4,26 +4,7 @@ A Rust daemon that bridges Jira and [Claude Code](https://docs.anthropic.com/en/
 
 ## How It Works
 
-```
-┌─────────┐         ┌──────────────────────────────────────────────────────┐
-│  Jira   │         │               claude-dispatch daemon                │
-│         │ REST    │                                                      │
-│ Tickets ├────────►│  ┌────────────┐    SQLite     ┌─────────────────┐   │
-│  (In    │  poll   │  │ Sync Loop  ├──────────────►│  Spawner Loop   │   │
-│Progress)│         │  └─────┬──────┘  state DB     └────────┬────────┘   │
-└─────────┘         │        │                               │            │
-                    │        ▼                               ▼            │
-                    │  ┌────────────┐               ┌─────────────────┐   │
-                    │  │  Claude    │               │  tmux windows   │   │
-                    │  │  Planner   │               │  (Claude Code   │   │
-                    │  │ (headless) │               │   sessions)     │   │
-                    │  └─────┬──────┘               └────────┬────────┘   │
-                    │        │                               │            │
-                    │        ▼                               ▼            │
-                    │   plan files                   code changes in      │
-                    │   (.md)                         your repo           │
-                    └──────────────────────────────────────────────────────┘
-```
+![Pipeline Overview](docs/pipeline-overview.png)
 
 ### Ticket Lifecycle
 
