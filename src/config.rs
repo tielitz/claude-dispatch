@@ -56,6 +56,7 @@ pub struct Config {
     pub jira: JiraConfig,
     pub claude: ClaudeConfig,
     pub paths: PathsConfig,
+    pub git: GitConfig,
     pub worktree: WorktreeConfig,
     pub tmux: TmuxConfig,
     pub spawner: SpawnerConfig,
@@ -110,13 +111,17 @@ pub struct PathsConfig {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct WorktreeConfig {
-    #[serde(default = "default_true")]
-    pub enabled: bool,
+pub struct GitConfig {
     #[serde(default = "default_branch_prefix")]
     pub branch_prefix: String,
     #[serde(default = "default_base_branch")]
     pub base_branch: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct WorktreeConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -190,6 +195,6 @@ impl Config {
 
     /// Git branch name for a given Jira ticket key.
     pub fn branch_for_ticket(&self, key: &str) -> String {
-        format!("{}/{}", self.worktree.branch_prefix, key.to_lowercase())
+        format!("{}/{}", self.git.branch_prefix, key.to_lowercase())
     }
 }

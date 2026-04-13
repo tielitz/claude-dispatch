@@ -224,13 +224,27 @@ fn shell_escape(s: &str) -> String {
 fn build_claude_args(config: &Config, ticket_key: &str) -> Vec<String> {
     let mut elements: Vec<String> = Vec::new();
 
+    let branch = config.branch_for_ticket(ticket_key);
+    let base_branch = &config.git.base_branch;
+
     if config.worktree.enabled {
-        let branch = config.branch_for_ticket(ticket_key);
         elements.push(shell_escape("--worktree"));
         elements.push(shell_escape(&branch));
     }
 
-    elements.push("\"Implement the plan in @$CDP_PLAN_FILE\"".to_string());
+    // $CDP_PLAN_FILE and $CDP_TICKET_KEY expand at runtime from tmux env vars.
+    // Branch name and base branch are embedded as literals (computed at spawn time).
+    let prompt = format!(
+        "\"Implement the plan in @$CDP_PLAN_FILE\n\n\
+         Git workflow — follow this for every service directory you modify:\n\
+         1. cd into the service directory (e.g. services/Puzzle)\n\
+         2. git fetch origin && git checkout {base_branch} && git pull\n\
+         3. git checkout -b {branch} || git checkout {branch}\n\
+         4. Implement the changes for that service\n\
+         5. git add <modified files> && git commit -m '$CDP_TICKET_KEY: <brief description>'\n\
+         Repeat steps 1-5 for each service you modify. Do NOT push any branch.\""
+    );
+    elements.push(prompt);
 
     if !config.claude.extra_flags.is_empty() {
         for flag in config.claude.extra_flags.split_whitespace() {
@@ -265,6 +279,8 @@ extra_flags = "{extra_flags}"
 [paths]
 output_dir = "/tmp/tickets"
 repo_root = "/tmp/repo"
+
+[git]
 
 [worktree]
 enabled = {worktree_enabled}

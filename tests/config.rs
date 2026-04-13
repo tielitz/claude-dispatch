@@ -31,10 +31,12 @@ repo_root = "/home/user/repo"
 state_dir = "/tmp/state"
 log_dir = "/tmp/logs"
 
-[worktree]
-enabled = false
+[git]
 branch_prefix = "task"
 base_branch = "develop"
+
+[worktree]
+enabled = false
 
 [tmux]
 session_name = "my-pipeline"
@@ -62,8 +64,8 @@ poll_interval_secs = 30
     assert_eq!(cfg.paths.log_dir, "/tmp/logs");
 
     assert!(!cfg.worktree.enabled);
-    assert_eq!(cfg.worktree.branch_prefix, "task");
-    assert_eq!(cfg.worktree.base_branch, "develop");
+    assert_eq!(cfg.git.branch_prefix, "task");
+    assert_eq!(cfg.git.base_branch, "develop");
 
     assert_eq!(cfg.tmux.session_name, "my-pipeline");
     assert_eq!(cfg.spawner.poll_interval_secs, 30);
@@ -87,6 +89,8 @@ home_dir = "~/.claude"
 output_dir = "~/.dev-pipeline/tickets"
 repo_root = "~/projects/repo"
 
+[git]
+
 [worktree]
 
 [tmux]
@@ -104,8 +108,8 @@ repo_root = "~/projects/repo"
     assert_eq!(cfg.paths.log_dir, "~/.dev-pipeline/logs");
 
     assert!(cfg.worktree.enabled);
-    assert_eq!(cfg.worktree.branch_prefix, "feature");
-    assert_eq!(cfg.worktree.base_branch, "main");
+    assert_eq!(cfg.git.branch_prefix, "feature");
+    assert_eq!(cfg.git.base_branch, "main");
 
     assert_eq!(cfg.tmux.session_name, "dev-pipeline");
     assert_eq!(cfg.spawner.poll_interval_secs, 10);
@@ -143,6 +147,8 @@ home_dir = "~/.claude"
 output_dir = "/tmp/tickets"
 repo_root = "/tmp/repo"
 
+[git]
+
 [worktree]
 
 [tmux]
@@ -170,6 +176,8 @@ home_dir = "~/.claude"
 output_dir = "/tmp/tickets"
 repo_root = "/tmp/repo"
 
+[git]
+
 [worktree]
 
 [tmux]
@@ -196,6 +204,8 @@ home_dir = "~/.claude"
 [paths]
 output_dir = "/tmp/tickets"
 repo_root = "/tmp/repo"
+
+[git]
 
 [worktree]
 
@@ -225,6 +235,8 @@ home_dir = "~/.claude"
 [paths]
 output_dir = "/tmp/tickets"
 repo_root = "/tmp/repo"
+
+[git]
 
 [worktree]
 
@@ -273,6 +285,8 @@ home_dir = "~/.claude"
 [paths]
 output_dir = "/tmp/tickets"
 repo_root = "/tmp/repo"
+
+[git]
 
 [worktree]
 
