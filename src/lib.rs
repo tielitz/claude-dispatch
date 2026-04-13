@@ -119,7 +119,13 @@ pub async fn run_pipeline(config: config::Config) {
     }
 }
 
-pub fn setup_tracing(config: &config::Config) {
+/// Initialize global tracing. Returns the `WorkerGuard` for the non-blocking
+/// file appender — the caller MUST keep it alive for the program's lifetime.
+/// Dropping the guard shuts down the background writer thread and any
+/// buffered log lines are silently discarded (which is why log files were
+/// previously empty).
+#[must_use = "dropping the WorkerGuard stops the background log writer and discards buffered lines"]
+pub fn setup_tracing(config: &config::Config) -> tracing_appender::non_blocking::WorkerGuard {
     let log_dir = config.log_dir();
 
     let env_filter =
@@ -128,12 +134,20 @@ pub fn setup_tracing(config: &config::Config) {
     let stderr_layer = fmt::layer().with_ansi(true);
 
     let file_appender = tracing_appender::rolling::daily(&log_dir, "claude-dispatch.log");
-    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-    let file_layer = fmt::layer().with_ansi(false).with_writer(non_blocking);
+    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+    let file_layer = fmt::layer()
+        .with_ansi(false)
+        .with_target(true)
+        .with_thread_ids(true)
+        .with_line_number(true)
+        .with_file(true)
+        .with_writer(non_blocking);
 
     tracing_subscriber::registry()
         .with(env_filter)
         .with(stderr_layer)
         .with(file_layer)
         .init();
+
+    guard
 }

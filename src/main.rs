@@ -27,7 +27,9 @@ async fn main() {
         }
     }
 
-    claude_dispatch::setup_tracing(&config);
+    // Hold the guard for the lifetime of the process; dropping it shuts down
+    // the non-blocking file writer and discards buffered log lines.
+    let _log_guard = claude_dispatch::setup_tracing(&config);
 
     // Tmux self-hosting: if running the pipeline and not already inside tmux,
     // create a tmux session and re-exec ourselves inside it.

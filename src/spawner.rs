@@ -88,6 +88,8 @@ async fn spawn_tmux_session(
     let state_dir = config.state_dir();
     let repo_root = config.repo_root();
     let claude_home = config.claude_home();
+    let log_dir = config.log_dir();
+    fs::create_dir_all(&log_dir)?;
 
     let current_exe = std::env::current_exe()?;
 
@@ -116,10 +118,21 @@ set -uo pipefail
 cd "$CDP_REPO_ROOT" || exit 1
 export CLAUDE_CONFIG_DIR="$CDP_CLAUDE_HOME"
 
+# Mirror the entire pane (stdout+stderr) to a per-ticket implementation log
+# so that Claude's full output — including any errors — survives after the
+# tmux pane closes. Without this, the only record was scrollback in the pane.
+mkdir -p "$CDP_LOG_DIR"
+IMPL_LOG="$CDP_LOG_DIR/impl-$CDP_TICKET_KEY.log"
+exec > >(tee -a "$IMPL_LOG") 2>&1
+
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  Dev Pipeline — $CDP_TICKET_KEY"
-echo "  Plan file: $CDP_PLAN_FILE"
+echo "  Plan file:  $CDP_PLAN_FILE"
+echo "  Impl log:   $IMPL_LOG"
+echo "  Started at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "[claude-dispatch] invoking: claude {claude_args_str}"
 echo ""
 
 # Plan file is referenced via @<path> in the prompt — Claude reads it directly.
@@ -127,12 +140,12 @@ echo ""
 claude {claude_args_str}
 EXIT_CODE=$?
 
+echo ""
 if [ $EXIT_CODE -eq 0 ]; then
-    echo ""
-    echo "Session completed successfully for $CDP_TICKET_KEY"
+    echo "[claude-dispatch] session completed successfully for $CDP_TICKET_KEY"
 else
-    echo ""
-    echo "Session failed for $CDP_TICKET_KEY (exit code: $EXIT_CODE)"
+    echo "[claude-dispatch] session FAILED for $CDP_TICKET_KEY (exit code: $EXIT_CODE)"
+    echo "[claude-dispatch] full log: $IMPL_LOG"
 fi
 
 "$CDP_BINARY" --config "$CDP_CONFIG_PATH" mark-done "$CDP_TICKET_KEY"
@@ -163,6 +176,7 @@ sleep 10
         ("CDP_BINARY", current_exe.display().to_string()),
         ("CDP_PLAN_FILE", plan_file.to_string()),
         ("CDP_CONFIG_PATH", config_path.clone()),
+        ("CDP_LOG_DIR", log_dir.display().to_string()),
     ];
 
     // Split a new pane in the existing session for this agent.
