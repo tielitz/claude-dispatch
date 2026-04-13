@@ -1,20 +1,5 @@
 {
   "enabledPlugins": {
     "superpowers@claude-plugins-official": true
-  },
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "Write|Edit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "jq -r '.tool_response.filePath // .tool_input.file_path' | { read -r f; if echo \"$f\" | grep -qE '\\.rs$'; then cargo fmt --manifest-path /Users/tielitz/Projects/Playground/claude-jira-workflow/Cargo.toml; fi; } 2>/dev/null || true",
-            "timeout": 30,
-            "statusMessage": "Running cargo fmt..."
-          }
-        ]
-      }
-    ]
   }
 }
