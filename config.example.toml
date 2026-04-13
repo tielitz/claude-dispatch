@@ -10,7 +10,7 @@ fetch_limit = 5
 jql = 'assignee = currentUser() AND status = "In Progress"'
 
 [claude]
-home_dir = "~/.claude-dispatch"
+home_dir = "~/.claude"
 extra_flags = ""
 plan_prompt_template = ""
 

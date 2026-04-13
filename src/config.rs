@@ -41,6 +41,10 @@ fn default_log_level() -> String {
     "info".to_string()
 }
 
+fn default_claude_home() -> String {
+    "~/.claude".to_string()
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
     #[serde(skip)]
@@ -87,6 +91,7 @@ impl std::fmt::Debug for JiraConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct ClaudeConfig {
+    #[serde(default = "default_claude_home")]
     pub home_dir: String,
     #[serde(default)]
     pub extra_flags: String,
