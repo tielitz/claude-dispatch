@@ -45,12 +45,18 @@ fn default_claude_home() -> String {
     "~/.claude".to_string()
 }
 
+fn default_schema_version() -> u32 {
+    1
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
     #[serde(skip)]
     pub config_path: Option<PathBuf>,
     #[serde(skip)]
     pub debug: bool,
+    #[serde(default = "default_schema_version")]
+    pub schema_version: u32,
     #[serde(default = "default_log_level")]
     pub log_level: String,
     pub jira: JiraConfig,

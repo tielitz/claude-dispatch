@@ -28,6 +28,12 @@ pub fn load(cli: Option<&Path>) -> Result<Config, ConfigError> {
 
     merge_toml(&mut merged, env);
 
+    let raw_version = merged
+        .get("schema_version")
+        .and_then(|v| v.as_integer())
+        .unwrap_or(1) as u32;
+    crate::config::migrate::run(&mut merged, raw_version)?;
+
     let last_path = sources.last().cloned();
     let mut cfg: Config = merged
         .try_into()

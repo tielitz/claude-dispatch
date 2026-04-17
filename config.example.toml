@@ -1,6 +1,8 @@
 # Log level: trace, debug, info, warn, error (overridden by RUST_LOG env var)
 # log_level = "info"
 
+schema_version = 1
+
 [jira]
 instance = "mycompany"
 email = "you@company.com"

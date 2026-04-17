@@ -757,6 +757,99 @@ fn test_wizard_not_triggered_when_cli_provided() {
     }
 }
 
+// --- Schema versioning (Task 6) ---
+
+#[test]
+fn test_schema_version_1_loads() {
+    let toml = r#"
+schema_version = 1
+
+[jira]
+instance = "acme"
+email = "a@b"
+api_token = "token"
+jql = 'status = "In Progress"'
+
+[claude]
+home_dir = "~/.claude"
+
+[paths]
+output_dir = "/tmp/tickets"
+repo_root = "/tmp/repo"
+
+[worktree]
+
+[tmux]
+
+[spawner]
+"#;
+    let f = write_temp_toml(toml);
+    let cfg = Config::load(Some(f.path())).expect("schema v1 should load");
+    assert_eq!(cfg.schema_version, 1);
+}
+
+#[test]
+fn test_missing_schema_version_defaults_to_1() {
+    let toml = r#"
+[jira]
+instance = "acme"
+email = "a@b"
+api_token = "token"
+jql = 'status = "In Progress"'
+
+[claude]
+home_dir = "~/.claude"
+
+[paths]
+output_dir = "/tmp/tickets"
+repo_root = "/tmp/repo"
+
+[worktree]
+
+[tmux]
+
+[spawner]
+"#;
+    let f = write_temp_toml(toml);
+    let cfg = Config::load(Some(f.path())).expect("missing version should default");
+    assert_eq!(cfg.schema_version, 1);
+}
+
+#[test]
+fn test_unknown_schema_version_errors() {
+    let toml = r#"
+schema_version = 999
+
+[jira]
+instance = "acme"
+email = "a@b"
+api_token = "token"
+jql = 'status = "In Progress"'
+
+[claude]
+home_dir = "~/.claude"
+
+[paths]
+output_dir = "/tmp/tickets"
+repo_root = "/tmp/repo"
+
+[worktree]
+
+[tmux]
+
+[spawner]
+"#;
+    let f = write_temp_toml(toml);
+    let err = Config::load(Some(f.path())).expect_err("schema_version 999 must fail");
+    match err {
+        ConfigError::UnknownSchemaVersion { found, supported } => {
+            assert_eq!(found, 999);
+            assert_eq!(supported, &[1]);
+        }
+        other => panic!("expected UnknownSchemaVersion, got {:?}", other),
+    }
+}
+
 #[test]
 fn test_wizard_not_triggered_when_env_provides_config() {
     let _lock = ENV_LOCK.lock().unwrap();
