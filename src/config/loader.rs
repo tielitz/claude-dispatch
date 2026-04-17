@@ -8,11 +8,9 @@ pub fn load(cli: Option<&Path>) -> Result<Config, ConfigError> {
     let env_empty = env.as_table().map(|t| t.is_empty()).unwrap_or(true);
 
     if cli.is_none() && sources.is_empty() && env_empty {
-        // Task 5 replaces this with wizard bootstrap.
-        return Err(ConfigError::Io {
-            path: paths::user_config_path()?,
-            source: std::io::Error::from(std::io::ErrorKind::NotFound),
-        });
+        let target = paths::user_config_path()?;
+        crate::config::wizard::write_template(&target)?;
+        return Err(ConfigError::WizardBootstrap(target));
     }
 
     let mut merged = toml::Value::Table(Default::default());

@@ -12,6 +12,7 @@ pub use schema::{
     ClaudeConfig, Config, GitConfig, JiraConfig, PathsConfig, SpawnerConfig, TmuxConfig,
     WorktreeConfig,
 };
+pub use wizard::write_template;
 
 use std::path::PathBuf;
 

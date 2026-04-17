@@ -2,7 +2,7 @@ use std::io::Write as _;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use claude_dispatch::config::{Config, expand_path};
+use claude_dispatch::config::{Config, ConfigError, expand_path};
 use once_cell::sync::Lazy;
 
 fn write_temp_toml(content: &str) -> tempfile::NamedTempFile {
@@ -691,4 +691,93 @@ fn test_env_only_load_succeeds_with_all_required() {
     assert_eq!(cfg.jira.instance, "acme");
     assert_eq!(cfg.jira.email, "e@f");
     drop(guards);
+}
+
+// --- First-run wizard (Task 5) ---
+
+#[test]
+fn test_wizard_writes_template_when_no_sources() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let _cleanup = clear_all_claude_dispatch_env();
+
+    let tmp_home = tempfile::tempdir().expect("tempdir");
+    let _hg = EnvGuard::set("HOME", tmp_home.path().to_str().unwrap());
+
+    let result = Config::load(None);
+    let path = match result {
+        Err(ConfigError::WizardBootstrap(p)) => p,
+        other => panic!("expected WizardBootstrap, got {:?}", other.map(|_| ())),
+    };
+    assert!(
+        path.exists(),
+        "wizard must create template file at {:?}",
+        path
+    );
+    let content = std::fs::read_to_string(&path).expect("read template");
+    let expected = include_str!("../config.example.toml");
+    assert_eq!(
+        content, expected,
+        "template content must match config.example.toml byte-for-byte"
+    );
+}
+
+#[test]
+fn test_wizard_creates_parent_dir() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let _cleanup = clear_all_claude_dispatch_env();
+
+    let tmp_home = tempfile::tempdir().expect("tempdir");
+    let _hg = EnvGuard::set("HOME", tmp_home.path().to_str().unwrap());
+
+    // user_config_path lives under HOME/.config/... (linux) or
+    // HOME/Library/Application Support/... (macOS). Neither is pre-created in
+    // the tempdir, so write_template must create the parent.
+    let _ = Config::load(None); // triggers wizard; errors expected
+    let expected = claude_dispatch::config::user_config_path().unwrap();
+    assert!(expected.exists(), "wizard should have written template");
+    assert!(
+        expected.parent().unwrap().is_dir(),
+        "wizard should have created parent dir"
+    );
+}
+
+#[test]
+fn test_wizard_not_triggered_when_cli_provided() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let _cleanup = clear_all_claude_dispatch_env();
+
+    let tmp_home = tempfile::tempdir().expect("tempdir");
+    let _hg = EnvGuard::set("HOME", tmp_home.path().to_str().unwrap());
+
+    let bogus = tmp_home.path().join("nonexistent.toml");
+    let err = Config::load(Some(&bogus)).expect_err("should fail on missing cli path");
+    match err {
+        ConfigError::Io { .. } => {}
+        other => panic!("expected Io error for missing file, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_wizard_not_triggered_when_env_provides_config() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let _cleanup = clear_all_claude_dispatch_env();
+
+    let tmp_home = tempfile::tempdir().expect("tempdir");
+    let _hg = EnvGuard::set("HOME", tmp_home.path().to_str().unwrap());
+
+    // No file anywhere. Env supplies everything.
+    let _guards = vec![
+        EnvGuard::set("CLAUDE_DISPATCH_JIRA__INSTANCE", "acme"),
+        EnvGuard::set("CLAUDE_DISPATCH_JIRA__EMAIL", "e@f"),
+        EnvGuard::set("CLAUDE_DISPATCH_JIRA__API_TOKEN", "tok"),
+        EnvGuard::set("CLAUDE_DISPATCH_JIRA__JQL", "status"),
+        EnvGuard::set("CLAUDE_DISPATCH_CLAUDE__HOME_DIR", "~/.claude"),
+        EnvGuard::set("CLAUDE_DISPATCH_PATHS__OUTPUT_DIR", "/tmp/tickets"),
+        EnvGuard::set("CLAUDE_DISPATCH_PATHS__REPO_ROOT", "/tmp/repo"),
+        EnvGuard::set("CLAUDE_DISPATCH_WORKTREE__ENABLED", "true"),
+        EnvGuard::set("CLAUDE_DISPATCH_TMUX__SESSION_NAME", "x"),
+        EnvGuard::set("CLAUDE_DISPATCH_SPAWNER__POLL_INTERVAL_SECS", "10"),
+    ];
+    let cfg = Config::load(None).expect("env-only load should not trigger wizard");
+    assert_eq!(cfg.jira.email, "e@f");
 }

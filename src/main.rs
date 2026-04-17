@@ -1,4 +1,5 @@
 use clap::Parser;
+use claude_dispatch::config::{Config, ConfigError};
 use claude_dispatch::{Cli, Commands, handle_mark_done, run_pipeline, validate_ticket_key};
 
 #[tokio::main]
@@ -6,8 +7,16 @@ async fn main() {
     let cli = Cli::parse();
 
     // Load config
-    let mut config = match claude_dispatch::config::Config::load(Some(cli.config.as_path())) {
+    let mut config = match Config::load(Some(cli.config.as_path())) {
         Ok(cfg) => cfg,
+        Err(ConfigError::WizardBootstrap(path)) => {
+            eprintln!("No configuration file found.");
+            eprintln!("A template has been written to: {}", path.display());
+            eprintln!(
+                "Please edit it with your Jira credentials and repo paths, then re-run claude-dispatch."
+            );
+            std::process::exit(2);
+        }
         Err(e) => {
             eprintln!("Failed to load config from {}: {}", cli.config.display(), e);
             std::process::exit(1);
