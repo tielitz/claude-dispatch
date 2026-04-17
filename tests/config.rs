@@ -66,6 +66,24 @@ fn clear_all_claude_dispatch_env() -> Vec<EnvGuard> {
         .collect()
 }
 
+/// Isolates `user_config_path()` behind a tempdir.
+///
+/// `directories::ProjectDirs` on Linux prefers `$XDG_CONFIG_HOME` over `$HOME`
+/// when both are set (which is the default on GitHub Actions runners). Setting
+/// only `HOME` therefore isn't enough — we also unset the XDG overrides so the
+/// resolved path always lands inside the tempdir. On macOS the XDG unset is a
+/// no-op; `HOME` alone is sufficient there.
+fn isolate_user_config() -> (tempfile::TempDir, Vec<EnvGuard>) {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let guards = vec![
+        EnvGuard::set("HOME", tmp.path().to_str().unwrap()),
+        EnvGuard::unset("XDG_CONFIG_HOME"),
+        EnvGuard::unset("XDG_DATA_HOME"),
+        EnvGuard::unset("XDG_CACHE_HOME"),
+    ];
+    (tmp, guards)
+}
+
 #[test]
 fn test_parse_full_config() {
     let _lock = ENV_LOCK.lock().unwrap();
@@ -698,8 +716,7 @@ fn test_env_only_load_succeeds_with_all_required() {
 
     // Use a bogus HOME so user_config_path points somewhere that doesn't exist.
     // (ProjectDirs consults HOME on Unix.)
-    let tmp_home = tempfile::tempdir().expect("tempdir");
-    let _hg = EnvGuard::set("HOME", tmp_home.path().to_str().unwrap());
+    let (_tmp_home, _home_guards) = isolate_user_config();
 
     // No -c flag, no file at user_config_path. Supply all required fields via env.
     // `worktree`, `tmux`, `spawner` sections are required to exist in the Config
@@ -730,8 +747,7 @@ fn test_wizard_writes_template_when_no_sources() {
     let _lock = ENV_LOCK.lock().unwrap();
     let _cleanup = clear_all_claude_dispatch_env();
 
-    let tmp_home = tempfile::tempdir().expect("tempdir");
-    let _hg = EnvGuard::set("HOME", tmp_home.path().to_str().unwrap());
+    let (_tmp_home, _home_guards) = isolate_user_config();
 
     let result = Config::load(None);
     let path = match result {
@@ -756,8 +772,7 @@ fn test_wizard_creates_parent_dir() {
     let _lock = ENV_LOCK.lock().unwrap();
     let _cleanup = clear_all_claude_dispatch_env();
 
-    let tmp_home = tempfile::tempdir().expect("tempdir");
-    let _hg = EnvGuard::set("HOME", tmp_home.path().to_str().unwrap());
+    let (_tmp_home, _home_guards) = isolate_user_config();
 
     // user_config_path lives under HOME/.config/... (linux) or
     // HOME/Library/Application Support/... (macOS). Neither is pre-created in
@@ -776,10 +791,9 @@ fn test_wizard_not_triggered_when_cli_provided() {
     let _lock = ENV_LOCK.lock().unwrap();
     let _cleanup = clear_all_claude_dispatch_env();
 
-    let tmp_home = tempfile::tempdir().expect("tempdir");
-    let _hg = EnvGuard::set("HOME", tmp_home.path().to_str().unwrap());
+    let (_tmp_home, _home_guards) = isolate_user_config();
 
-    let bogus = tmp_home.path().join("nonexistent.toml");
+    let bogus = _tmp_home.path().join("nonexistent.toml");
     let err = Config::load(Some(&bogus)).expect_err("should fail on missing cli path");
     match err {
         ConfigError::Io { .. } => {}
@@ -894,8 +908,7 @@ fn test_wizard_not_triggered_when_env_provides_config() {
     let _lock = ENV_LOCK.lock().unwrap();
     let _cleanup = clear_all_claude_dispatch_env();
 
-    let tmp_home = tempfile::tempdir().expect("tempdir");
-    let _hg = EnvGuard::set("HOME", tmp_home.path().to_str().unwrap());
+    let (_tmp_home, _home_guards) = isolate_user_config();
 
     // No file anywhere. Env supplies everything.
     let _guards = vec![
@@ -1136,8 +1149,7 @@ fn test_init_writes_template_to_user_config_path() {
     let _lock = ENV_LOCK.lock().unwrap();
     let _cleanup = clear_all_claude_dispatch_env();
 
-    let tmp_home = tempfile::tempdir().expect("tempdir");
-    let _hg = EnvGuard::set("HOME", tmp_home.path().to_str().unwrap());
+    let (_tmp_home, _home_guards) = isolate_user_config();
 
     let path = user_config_path().expect("user config path");
     write_template(&path).expect("write template");
