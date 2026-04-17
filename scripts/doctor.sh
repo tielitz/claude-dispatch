@@ -25,19 +25,42 @@ check "tmux" "$(command -v tmux >/dev/null 2>&1 && echo true || echo false)"
 check "git" "$(command -v git >/dev/null 2>&1 && echo true || echo false)"
 check "just" "$(command -v just >/dev/null 2>&1 && echo true || echo false)"
 
-config_path="$(pwd)/config.toml"
+# Per-OS user config path (mirrors `directories::ProjectDirs` output).
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    USER_CFG="$HOME/Library/Application Support/dev.claude-dispatch.claude-dispatch/config.toml"
+elif [[ "$OSTYPE" == "linux"* ]]; then
+    USER_CFG="${XDG_CONFIG_HOME:-$HOME/.config}/claude-dispatch/config.toml"
+else
+    USER_CFG=""
+fi
+
+DEV_CFG="$(pwd)/config.toml"
 
 echo ""
-echo "Configuration ($config_path)"
+echo "Configuration"
 echo "────────────────────"
-check "config.toml exists" "$([ -f config.toml ] && echo true || echo false)"
-if [ -f config.toml ]; then
-    check "  [jira] section" "$(grep -q '^\[jira\]' config.toml && echo true || echo false)"
-    check "  [claude] section" "$(grep -q '^\[claude\]' config.toml && echo true || echo false)"
-    check "  [paths] section" "$(grep -q '^\[paths\]' config.toml && echo true || echo false)"
-    check "  [worktree] section" "$(grep -q '^\[worktree\]' config.toml && echo true || echo false)"
-    check "  [tmux] section" "$(grep -q '^\[tmux\]' config.toml && echo true || echo false)"
-    check "  [spawner] section" "$(grep -q '^\[spawner\]' config.toml && echo true || echo false)"
+if [ -n "$USER_CFG" ]; then
+    check "user config: $USER_CFG" "$([ -f "$USER_CFG" ] && echo true || echo false)"
+fi
+check "dev config ($DEV_CFG, for 'just run')" "$([ -f "$DEV_CFG" ] && echo true || echo false)"
+
+# Pick whichever exists to run section checks against.
+ACTIVE_CFG=""
+if [ -f "$DEV_CFG" ]; then
+    ACTIVE_CFG="$DEV_CFG"
+elif [ -n "$USER_CFG" ] && [ -f "$USER_CFG" ]; then
+    ACTIVE_CFG="$USER_CFG"
+fi
+
+if [ -n "$ACTIVE_CFG" ]; then
+    echo "  Checking keys in: $ACTIVE_CFG"
+    check "  schema_version" "$(grep -q '^schema_version' "$ACTIVE_CFG" && echo true || echo false)"
+    check "  [jira] section" "$(grep -q '^\[jira\]' "$ACTIVE_CFG" && echo true || echo false)"
+    check "  [claude] section" "$(grep -q '^\[claude\]' "$ACTIVE_CFG" && echo true || echo false)"
+    check "  [paths] section" "$(grep -q '^\[paths\]' "$ACTIVE_CFG" && echo true || echo false)"
+    check "  [worktree] section" "$(grep -q '^\[worktree\]' "$ACTIVE_CFG" && echo true || echo false)"
+    check "  [tmux] section" "$(grep -q '^\[tmux\]' "$ACTIVE_CFG" && echo true || echo false)"
+    check "  [spawner] section" "$(grep -q '^\[spawner\]' "$ACTIVE_CFG" && echo true || echo false)"
 fi
 
 echo ""

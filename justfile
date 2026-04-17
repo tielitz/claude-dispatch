@@ -15,10 +15,14 @@ release:
     cargo build --release
 
 run:
-    cargo run
+    cargo run -- -c config.toml
 
 run-mark-done ticket:
-    cargo run -- mark-done {{ticket}}
+    cargo run -- -c config.toml mark-done {{ticket}}
+
+# Write a fresh config template to the per-OS user config dir.
+init-config:
+    cargo run -- --init
 
 test:
     cargo test
