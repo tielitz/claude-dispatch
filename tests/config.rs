@@ -89,8 +89,6 @@ home_dir = "~/.claude"
 output_dir = "~/.dev-pipeline/tickets"
 repo_root = "~/projects/repo"
 
-[git]
-
 [worktree]
 
 [tmux]
@@ -147,8 +145,6 @@ home_dir = "~/.claude"
 output_dir = "/tmp/tickets"
 repo_root = "/tmp/repo"
 
-[git]
-
 [worktree]
 
 [tmux]
@@ -176,8 +172,6 @@ home_dir = "~/.claude"
 output_dir = "/tmp/tickets"
 repo_root = "/tmp/repo"
 
-[git]
-
 [worktree]
 
 [tmux]
@@ -204,8 +198,6 @@ home_dir = "~/.claude"
 [paths]
 output_dir = "/tmp/tickets"
 repo_root = "/tmp/repo"
-
-[git]
 
 [worktree]
 
@@ -235,8 +227,6 @@ home_dir = "~/.claude"
 [paths]
 output_dir = "/tmp/tickets"
 repo_root = "/tmp/repo"
-
-[git]
 
 [worktree]
 
@@ -286,8 +276,6 @@ home_dir = "~/.claude"
 output_dir = "/tmp/tickets"
 repo_root = "/tmp/repo"
 
-[git]
-
 [worktree]
 
 [tmux]
@@ -305,5 +293,68 @@ repo_root = "/tmp/repo"
         !debug_output.contains("my-secret-key-xyz"),
         "API token must not leak through Config Debug, got: {}",
         debug_output
+    );
+}
+
+// --- Security: reject unsafe git identifiers that could inject shell metachars ---
+
+fn minimal_toml_with_git_block(git_block: &str) -> String {
+    format!(
+        r#"
+[jira]
+instance = "acme"
+email = "dev@acme.com"
+api_token = "token"
+jql = 'status = "In Progress"'
+
+[claude]
+home_dir = "~/.claude"
+
+[paths]
+output_dir = "/tmp/tickets"
+repo_root = "/tmp/repo"
+
+{git_block}
+
+[worktree]
+
+[tmux]
+
+[spawner]
+"#
+    )
+}
+
+#[test]
+fn test_load_rejects_unsafe_branch_prefix() {
+    let toml = minimal_toml_with_git_block(
+        r#"[git]
+branch_prefix = "feat$(whoami)"
+base_branch = "main"
+"#,
+    );
+    let f = write_temp_toml(&toml);
+    let err = Config::load(f.path()).expect_err("unsafe branch_prefix must be rejected");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("branch_prefix"),
+        "error should mention branch_prefix: {msg}"
+    );
+}
+
+#[test]
+fn test_load_rejects_unsafe_base_branch() {
+    let toml = minimal_toml_with_git_block(
+        r#"[git]
+branch_prefix = "feature"
+base_branch = "main;rm -rf /"
+"#,
+    );
+    let f = write_temp_toml(&toml);
+    let err = Config::load(f.path()).expect_err("unsafe base_branch must be rejected");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("base_branch"),
+        "error should mention base_branch: {msg}"
     );
 }

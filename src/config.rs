@@ -56,6 +56,7 @@ pub struct Config {
     pub jira: JiraConfig,
     pub claude: ClaudeConfig,
     pub paths: PathsConfig,
+    #[serde(default)]
     pub git: GitConfig,
     pub worktree: WorktreeConfig,
     pub tmux: TmuxConfig,
@@ -118,6 +119,15 @@ pub struct GitConfig {
     pub base_branch: String,
 }
 
+impl Default for GitConfig {
+    fn default() -> Self {
+        Self {
+            branch_prefix: default_branch_prefix(),
+            base_branch: default_base_branch(),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct WorktreeConfig {
     #[serde(default = "default_true")]
@@ -145,13 +155,45 @@ pub fn expand_path(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
+/// Returns true if `s` only contains characters safe to embed in a
+/// double-quoted shell string without risk of command substitution or quote
+/// escape. The allowed set matches valid git ref name characters plus `.`.
+fn is_safe_git_ident(s: &str) -> bool {
+    !s.is_empty()
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'/' || b == b'_' || b == b'-' || b == b'.')
+}
+
 impl Config {
     /// Load a `Config` from a TOML file at `path`.
     pub fn load(path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
         let content = std::fs::read_to_string(path)?;
         let mut config: Config = toml::from_str(&content)?;
         config.config_path = Some(path.canonicalize().unwrap_or_else(|_| path.to_path_buf()));
+        config.validate()?;
         Ok(config)
+    }
+
+    /// Validate config values that get interpolated into shell commands or
+    /// prompts. `git.branch_prefix` and `git.base_branch` must be restricted
+    /// to a safe git-ref charset so they cannot inject shell metacharacters
+    /// when embedded in the double-quoted implementation prompt.
+    fn validate(&self) -> Result<(), Box<dyn std::error::Error>> {
+        if !is_safe_git_ident(&self.git.branch_prefix) {
+            return Err(format!(
+                "config.git.branch_prefix contains disallowed characters: {:?} (allowed: A-Z a-z 0-9 / _ - .)",
+                self.git.branch_prefix
+            )
+            .into());
+        }
+        if !is_safe_git_ident(&self.git.base_branch) {
+            return Err(format!(
+                "config.git.base_branch contains disallowed characters: {:?} (allowed: A-Z a-z 0-9 / _ - .)",
+                self.git.base_branch
+            )
+            .into());
+        }
+        Ok(())
     }
 
     /// Expanded `paths.output_dir`.

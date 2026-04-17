@@ -27,7 +27,7 @@ Draft a detailed implementation plan for this ticket. Your plan should:
 4. Note any edge cases or risks
 5. Suggest what tests should be written
 6. Specify the git workflow:
-   - List the exact service directories (relative to repo root, e.g. `services/Puzzle`) that will be modified
+   - List the service directories (relative to repo root) that will be modified
    - State the branch to create: `{{BRANCH}}` (from `{{BASE_BRANCH}}`)
    - Provide a suggested commit message for each service (prefix with the ticket key, e.g. `{{TICKET_KEY}}: description`)
 
