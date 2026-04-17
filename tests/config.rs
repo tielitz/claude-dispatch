@@ -398,3 +398,43 @@ fn test_config_error_variants_format() {
     let nod = ConfigError::NoUserConfigDir;
     assert!(!nod.to_string().is_empty());
 }
+
+// --- paths::user_config_path / paths::binary_adjacent_config_path ---
+
+#[test]
+fn test_user_config_path_is_absolute_and_under_home() {
+    use claude_dispatch::config::user_config_path;
+    let p = user_config_path().expect("user config path resolvable on this OS");
+    assert!(p.is_absolute(), "expected absolute path, got {:?}", p);
+    assert!(
+        p.file_name().map(|n| n == "config.toml").unwrap_or(false),
+        "expected filename config.toml, got {:?}",
+        p
+    );
+    let home = dirs::home_dir().expect("home dir must exist in test env");
+    assert!(
+        p.starts_with(&home),
+        "expected path under home dir {:?}, got {:?}",
+        home,
+        p
+    );
+}
+
+#[test]
+fn test_binary_adjacent_config_path_matches_exe_dir() {
+    use claude_dispatch::config::binary_adjacent_config_path;
+    let p = binary_adjacent_config_path().expect("current_exe should resolve in tests");
+    assert!(p.is_absolute(), "expected absolute path, got {:?}", p);
+    assert!(
+        p.file_name().map(|n| n == "config.toml").unwrap_or(false),
+        "expected filename config.toml, got {:?}",
+        p
+    );
+    // Sibling of the current exe.
+    let exe = std::env::current_exe().expect("current_exe in tests");
+    assert_eq!(
+        p.parent().expect("path must have parent"),
+        exe.parent().expect("exe must have parent"),
+        "binary-adjacent path must be sibling of exe"
+    );
+}

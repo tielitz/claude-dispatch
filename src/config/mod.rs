@@ -7,7 +7,7 @@ mod validate;
 mod wizard;
 
 pub use error::ConfigError;
-pub use paths::expand_path;
+pub use paths::{binary_adjacent_config_path, expand_path, user_config_path};
 pub use schema::{
     ClaudeConfig, Config, GitConfig, JiraConfig, PathsConfig, SpawnerConfig, TmuxConfig,
     WorktreeConfig,

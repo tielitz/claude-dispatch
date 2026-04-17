@@ -11,15 +11,21 @@ pub fn expand_path(path: &str) -> PathBuf {
 }
 
 /// Returns the path to the user's config file for this platform.
-/// Filled in by Task 2.
-#[allow(dead_code)]
+///
+/// Platform-specific locations:
+/// - Linux:   `~/.config/claude-dispatch/config.toml`
+/// - macOS:   `~/Library/Application Support/dev.claude-dispatch.claude-dispatch/config.toml`
+/// - Windows: `C:\Users\<user>\AppData\Roaming\claude-dispatch\claude-dispatch\config\config.toml`
 pub fn user_config_path() -> Result<PathBuf, ConfigError> {
-    unimplemented!("filled in by Task 2")
+    directories::ProjectDirs::from("dev", "claude-dispatch", "claude-dispatch")
+        .map(|pd| pd.config_dir().join("config.toml"))
+        .ok_or(ConfigError::NoUserConfigDir)
 }
 
 /// Returns a config path adjacent to the running binary, if determinable.
-/// Filled in by Task 2.
-#[allow(dead_code)]
 pub fn binary_adjacent_config_path() -> Option<PathBuf> {
-    unimplemented!("filled in by Task 2")
+    std::env::current_exe()
+        .ok()?
+        .parent()
+        .map(|p| p.join("config.toml"))
 }
