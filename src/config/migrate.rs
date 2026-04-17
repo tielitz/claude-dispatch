@@ -24,6 +24,9 @@ pub fn run(doc: &mut toml::Value, version: u32) -> Result<(), ConfigError> {
     }
     warn_deprecated_keys(doc);
 
+    // The three `#[allow]` attributes below are only necessary while
+    // `SUPPORTED_VERSIONS` has a single entry and no real migration bodies
+    // exist. Remove them when the first structural migration lands.
     #[allow(unused_mut)]
     let mut v = version;
     #[allow(clippy::never_loop)]

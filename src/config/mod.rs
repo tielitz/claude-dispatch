@@ -17,8 +17,14 @@ pub use wizard::write_template;
 use std::path::PathBuf;
 
 impl Config {
-    /// Load a `Config`. For Task 1 the caller must supply an explicit path;
-    /// future tasks will layer user/binary-adjacent defaults in.
+    /// Load a `Config` from four sources (ascending precedence):
+    /// 1. Per-OS user config file (if present).
+    /// 2. `config.toml` adjacent to the binary (if present).
+    /// 3. `CLAUDE_DISPATCH_*` environment variables (nested via `__`).
+    /// 4. `cli` — when `Some`, replaces both file defaults; env still overlays.
+    ///
+    /// When all four are empty, the first-run wizard writes a template to the
+    /// user config path and returns `ConfigError::WizardBootstrap`.
     pub fn load(cli: Option<&std::path::Path>) -> Result<Config, ConfigError> {
         loader::load(cli)
     }
