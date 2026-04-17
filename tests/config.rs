@@ -421,6 +421,35 @@ fn test_user_config_path_is_absolute_and_under_home() {
 }
 
 #[test]
+fn test_cli_path_loads_specified_file() {
+    let toml = r#"
+[jira]
+instance = "acme"
+email = "dev@acme.com"
+api_token = "token"
+jql = 'status = "In Progress"'
+
+[claude]
+home_dir = "~/.claude"
+
+[paths]
+output_dir = "/tmp/tickets"
+repo_root = "/tmp/repo"
+
+[worktree]
+
+[tmux]
+
+[spawner]
+poll_interval_secs = 42
+"#;
+    let f = write_temp_toml(toml);
+    let cfg = Config::load(Some(f.path())).expect("cli path loads");
+    assert_eq!(cfg.spawner.poll_interval_secs, 42);
+    assert_eq!(cfg.jira.instance, "acme");
+}
+
+#[test]
 fn test_binary_adjacent_config_path_matches_exe_dir() {
     use claude_dispatch::config::binary_adjacent_config_path;
     let p = binary_adjacent_config_path().expect("current_exe should resolve in tests");

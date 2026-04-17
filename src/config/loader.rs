@@ -1,19 +1,73 @@
-use crate::config::{error::ConfigError, schema::Config};
-use std::path::Path;
+use crate::config::{error::ConfigError, paths, schema::Config};
+use std::fs;
+use std::path::{Path, PathBuf};
 
 pub fn load(cli: Option<&Path>) -> Result<Config, ConfigError> {
-    let path = cli.ok_or(ConfigError::NoUserConfigDir)?;
-    let content = std::fs::read_to_string(path).map_err(|e| ConfigError::Io {
-        path: path.to_path_buf(),
-        source: e,
-    })?;
-    let mut config: Config = toml::from_str(&content).map_err(|e| ConfigError::Parse {
-        path: path.to_path_buf(),
-        source: e,
-    })?;
-    config.config_path = Some(path.canonicalize().unwrap_or_else(|_| path.to_path_buf()));
-    validate(&config)?;
-    Ok(config)
+    let sources = resolve_file_sources(cli);
+
+    if sources.is_empty() {
+        // Task 5 replaces this with wizard bootstrap.
+        return Err(ConfigError::Io {
+            path: paths::user_config_path()?,
+            source: std::io::Error::from(std::io::ErrorKind::NotFound),
+        });
+    }
+
+    let mut merged = toml::Value::Table(Default::default());
+    for path in &sources {
+        let text = fs::read_to_string(path).map_err(|e| ConfigError::Io {
+            path: path.clone(),
+            source: e,
+        })?;
+        let layer: toml::Value = toml::from_str(&text).map_err(|e| ConfigError::Parse {
+            path: path.clone(),
+            source: e,
+        })?;
+        merge_toml(&mut merged, layer);
+    }
+
+    let last_path = sources.last().cloned();
+    let mut cfg: Config = merged
+        .try_into()
+        .map_err(|e: toml::de::Error| ConfigError::Parse {
+            path: last_path.clone().unwrap_or_default(),
+            source: e,
+        })?;
+    if let Some(p) = last_path {
+        cfg.config_path = Some(p.canonicalize().unwrap_or(p));
+    }
+    validate(&cfg)?;
+    Ok(cfg)
+}
+
+fn resolve_file_sources(cli: Option<&Path>) -> Vec<PathBuf> {
+    if let Some(p) = cli {
+        return vec![p.to_path_buf()];
+    }
+    let mut out = Vec::new();
+    if let Ok(p) = paths::user_config_path()
+        && p.exists()
+    {
+        out.push(p);
+    }
+    if let Some(p) = paths::binary_adjacent_config_path()
+        && p.exists()
+    {
+        out.push(p);
+    }
+    out
+}
+
+pub(crate) fn merge_toml(base: &mut toml::Value, overlay: toml::Value) {
+    match (base, overlay) {
+        (toml::Value::Table(b), toml::Value::Table(o)) => {
+            for (k, v) in o {
+                let slot = b.entry(k).or_insert(toml::Value::Table(Default::default()));
+                merge_toml(slot, v);
+            }
+        }
+        (slot, other) => *slot = other,
+    }
 }
 
 fn validate(cfg: &Config) -> Result<(), ConfigError> {
@@ -31,4 +85,90 @@ fn validate(cfg: &Config) -> Result<(), ConfigError> {
         )]));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_merge_toml_deep() {
+        let mut base: toml::Value = toml::from_str(
+            r#"
+[a]
+x = 1
+y = 2
+[b]
+k = "base"
+"#,
+        )
+        .unwrap();
+        let overlay: toml::Value = toml::from_str(
+            r#"
+[a]
+y = 99
+z = 3
+[b]
+k = "overlay"
+"#,
+        )
+        .unwrap();
+        merge_toml(&mut base, overlay);
+        let a = base.get("a").and_then(|v| v.as_table()).unwrap();
+        assert_eq!(a.get("x").and_then(|v| v.as_integer()), Some(1));
+        assert_eq!(a.get("y").and_then(|v| v.as_integer()), Some(99));
+        assert_eq!(a.get("z").and_then(|v| v.as_integer()), Some(3));
+        let b = base.get("b").and_then(|v| v.as_table()).unwrap();
+        assert_eq!(b.get("k").and_then(|v| v.as_str()), Some("overlay"));
+    }
+
+    #[test]
+    fn test_merge_toml_array_replaces() {
+        let mut base: toml::Value = toml::from_str("arr = [1, 2, 3]").unwrap();
+        let overlay: toml::Value = toml::from_str("arr = [9]").unwrap();
+        merge_toml(&mut base, overlay);
+        let arr = base.get("arr").unwrap().as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0].as_integer(), Some(9));
+    }
+
+    #[test]
+    fn test_merge_preserves_non_overlapping_and_overrides_overlapping() {
+        let mut base: toml::Value = toml::from_str(
+            r#"
+[spawner]
+poll_interval_secs = 10
+
+[git]
+branch_prefix = "feature"
+"#,
+        )
+        .unwrap();
+        let overlay: toml::Value = toml::from_str(
+            r#"
+[spawner]
+poll_interval_secs = 20
+"#,
+        )
+        .unwrap();
+        merge_toml(&mut base, overlay);
+        // binary-adjacent (overlay) wins
+        assert_eq!(
+            base.get("spawner")
+                .unwrap()
+                .get("poll_interval_secs")
+                .unwrap()
+                .as_integer(),
+            Some(20)
+        );
+        // user-config (base) non-overlapping key survives
+        assert_eq!(
+            base.get("git")
+                .unwrap()
+                .get("branch_prefix")
+                .unwrap()
+                .as_str(),
+            Some("feature")
+        );
+    }
 }
