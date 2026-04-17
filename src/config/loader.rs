@@ -44,7 +44,7 @@ pub fn load(cli: Option<&Path>) -> Result<Config, ConfigError> {
     if let Some(p) = last_path {
         cfg.config_path = Some(p.canonicalize().unwrap_or(p));
     }
-    validate(&cfg)?;
+    crate::config::validate::run(&cfg)?;
     Ok(cfg)
 }
 
@@ -121,23 +121,6 @@ fn insert_nested(table: &mut toml::value::Table, path: &[String], value: toml::V
             // change the shape of an already-set node. This is a noop (defensive).
         }
     }
-}
-
-fn validate(cfg: &Config) -> Result<(), ConfigError> {
-    use crate::config::schema::is_safe_git_ident;
-    if !is_safe_git_ident(&cfg.git.branch_prefix) {
-        return Err(ConfigError::Validation(vec![format!(
-            "git.branch_prefix contains disallowed characters: {:?} (allowed: A-Z a-z 0-9 / _ - .)",
-            cfg.git.branch_prefix
-        )]));
-    }
-    if !is_safe_git_ident(&cfg.git.base_branch) {
-        return Err(ConfigError::Validation(vec![format!(
-            "git.base_branch contains disallowed characters: {:?} (allowed: A-Z a-z 0-9 / _ - .)",
-            cfg.git.base_branch
-        )]));
-    }
-    Ok(())
 }
 
 #[cfg(test)]

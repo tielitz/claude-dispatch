@@ -874,3 +874,186 @@ fn test_wizard_not_triggered_when_env_provides_config() {
     let cfg = Config::load(None).expect("env-only load should not trigger wizard");
     assert_eq!(cfg.jira.email, "e@f");
 }
+
+// --- Multi-issue validation (Task 7) ---
+
+#[test]
+fn test_validation_accumulates_multiple_issues() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let _cleanup = clear_all_claude_dispatch_env();
+
+    let toml = r#"
+[jira]
+instance = "acme"
+email = "noatsign"
+api_token = "token"
+jql = 'status = "In Progress"'
+cron_schedule = "totally wrong"
+
+[claude]
+home_dir = "~/.claude"
+
+[paths]
+output_dir = "/tmp/tickets"
+repo_root = "/tmp/repo"
+
+[git]
+branch_prefix = "feat$(whoami)"
+base_branch = "main"
+
+[worktree]
+
+[tmux]
+
+[spawner]
+"#;
+    let f = write_temp_toml(toml);
+    let err = Config::load(Some(f.path())).expect_err("multi-issue should error");
+    match err {
+        ConfigError::Validation(v) => {
+            assert_eq!(v.len(), 3, "expected exactly three issues, got {:?}", v);
+            assert!(
+                v.iter().any(|s| s.contains("branch_prefix")),
+                "missing branch_prefix: {:?}",
+                v
+            );
+            assert!(
+                v.iter().any(|s| s.contains("email")),
+                "missing email: {:?}",
+                v
+            );
+            assert!(
+                v.iter().any(|s| s.contains("cron_schedule")),
+                "missing cron: {:?}",
+                v
+            );
+        }
+        other => panic!("expected Validation, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_validation_rejects_placeholder_token() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let _cleanup = clear_all_claude_dispatch_env();
+
+    let toml = r#"
+[jira]
+instance = "acme"
+email = "a@b"
+api_token = "your-api-token"
+jql = 'status = "In Progress"'
+
+[claude]
+home_dir = "~/.claude"
+
+[paths]
+output_dir = "/tmp/tickets"
+repo_root = "/tmp/repo"
+
+[worktree]
+
+[tmux]
+
+[spawner]
+"#;
+    let f = write_temp_toml(toml);
+    let err = Config::load(Some(f.path())).expect_err("placeholder token must fail");
+    let msg = err.to_string();
+    assert!(msg.contains("api_token"), "{msg}");
+    assert!(msg.contains("placeholder"), "{msg}");
+}
+
+#[test]
+fn test_validation_rejects_bad_cron() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let _cleanup = clear_all_claude_dispatch_env();
+
+    let toml = r#"
+[jira]
+instance = "acme"
+email = "a@b"
+api_token = "token"
+jql = 'status = "In Progress"'
+cron_schedule = "totally wrong"
+
+[claude]
+home_dir = "~/.claude"
+
+[paths]
+output_dir = "/tmp/tickets"
+repo_root = "/tmp/repo"
+
+[worktree]
+
+[tmux]
+
+[spawner]
+"#;
+    let f = write_temp_toml(toml);
+    let err = Config::load(Some(f.path())).expect_err("bad cron must fail");
+    assert!(err.to_string().contains("cron_schedule"), "{err}");
+}
+
+#[test]
+fn test_validation_rejects_bad_log_level() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let _cleanup = clear_all_claude_dispatch_env();
+
+    let toml = r#"
+log_level = "loud"
+
+[jira]
+instance = "acme"
+email = "a@b"
+api_token = "token"
+jql = 'status = "In Progress"'
+
+[claude]
+home_dir = "~/.claude"
+
+[paths]
+output_dir = "/tmp/tickets"
+repo_root = "/tmp/repo"
+
+[worktree]
+
+[tmux]
+
+[spawner]
+"#;
+    let f = write_temp_toml(toml);
+    let err = Config::load(Some(f.path())).expect_err("bad log_level must fail");
+    assert!(err.to_string().contains("log_level"), "{err}");
+}
+
+#[test]
+fn test_validation_rejects_zero_fetch_limit() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let _cleanup = clear_all_claude_dispatch_env();
+
+    let toml = r#"
+[jira]
+instance = "acme"
+email = "a@b"
+api_token = "token"
+jql = 'status = "In Progress"'
+fetch_limit = 0
+
+[claude]
+home_dir = "~/.claude"
+
+[paths]
+output_dir = "/tmp/tickets"
+repo_root = "/tmp/repo"
+
+[worktree]
+
+[tmux]
+
+[spawner]
+"#;
+    let f = write_temp_toml(toml);
+    let err = Config::load(Some(f.path())).expect_err("fetch_limit=0 must fail");
+    assert!(err.to_string().contains("fetch_limit"), "{err}");
+}
