@@ -26,6 +26,10 @@ Draft a detailed implementation plan for this ticket. Your plan should:
 3. Specify the order of implementation
 4. Note any edge cases or risks
 5. Suggest what tests should be written
+6. Specify the git workflow:
+   - List the service directories (relative to repo root) that will be modified
+   - State the branch to create: `{{BRANCH}}` (from `{{BASE_BRANCH}}`)
+   - Provide a suggested commit message for each service (prefix with the ticket key, e.g. `{{TICKET_KEY}}: description`)
 
 Output ONLY the implementation plan in markdown format. Do not implement anything.
 "#;
@@ -57,7 +61,7 @@ fn render_prompt(
     let template = load_template(config)?;
 
     let branch = config.branch_for_ticket(&ticket.key);
-    let base_branch = &config.worktree.base_branch;
+    let base_branch = &config.git.base_branch;
 
     let rendered = template
         .replace("{{TICKET_KEY}}", &ticket.key)
@@ -317,6 +321,8 @@ home_dir = "~/.claude"
 [paths]
 output_dir = "/tmp/tickets"
 repo_root = "/tmp/repo"
+
+[git]
 
 [worktree]
 

@@ -20,10 +20,12 @@ repo_root = "~/projects/my-service"
 state_dir = "~/.dev-pipeline"
 log_dir = "~/.dev-pipeline/logs"
 
-[worktree]
-enabled = true
+[git]
 branch_prefix = "feature"
 base_branch = "main"
+
+[worktree]
+enabled = true
 
 [tmux]
 session_name = "dev-pipeline"

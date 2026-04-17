@@ -31,10 +31,12 @@ repo_root = "/home/user/repo"
 state_dir = "/tmp/state"
 log_dir = "/tmp/logs"
 
-[worktree]
-enabled = false
+[git]
 branch_prefix = "task"
 base_branch = "develop"
+
+[worktree]
+enabled = false
 
 [tmux]
 session_name = "my-pipeline"
@@ -62,8 +64,8 @@ poll_interval_secs = 30
     assert_eq!(cfg.paths.log_dir, "/tmp/logs");
 
     assert!(!cfg.worktree.enabled);
-    assert_eq!(cfg.worktree.branch_prefix, "task");
-    assert_eq!(cfg.worktree.base_branch, "develop");
+    assert_eq!(cfg.git.branch_prefix, "task");
+    assert_eq!(cfg.git.base_branch, "develop");
 
     assert_eq!(cfg.tmux.session_name, "my-pipeline");
     assert_eq!(cfg.spawner.poll_interval_secs, 30);
@@ -104,8 +106,8 @@ repo_root = "~/projects/repo"
     assert_eq!(cfg.paths.log_dir, "~/.dev-pipeline/logs");
 
     assert!(cfg.worktree.enabled);
-    assert_eq!(cfg.worktree.branch_prefix, "feature");
-    assert_eq!(cfg.worktree.base_branch, "main");
+    assert_eq!(cfg.git.branch_prefix, "feature");
+    assert_eq!(cfg.git.base_branch, "main");
 
     assert_eq!(cfg.tmux.session_name, "dev-pipeline");
     assert_eq!(cfg.spawner.poll_interval_secs, 10);
@@ -291,5 +293,68 @@ repo_root = "/tmp/repo"
         !debug_output.contains("my-secret-key-xyz"),
         "API token must not leak through Config Debug, got: {}",
         debug_output
+    );
+}
+
+// --- Security: reject unsafe git identifiers that could inject shell metachars ---
+
+fn minimal_toml_with_git_block(git_block: &str) -> String {
+    format!(
+        r#"
+[jira]
+instance = "acme"
+email = "dev@acme.com"
+api_token = "token"
+jql = 'status = "In Progress"'
+
+[claude]
+home_dir = "~/.claude"
+
+[paths]
+output_dir = "/tmp/tickets"
+repo_root = "/tmp/repo"
+
+{git_block}
+
+[worktree]
+
+[tmux]
+
+[spawner]
+"#
+    )
+}
+
+#[test]
+fn test_load_rejects_unsafe_branch_prefix() {
+    let toml = minimal_toml_with_git_block(
+        r#"[git]
+branch_prefix = "feat$(whoami)"
+base_branch = "main"
+"#,
+    );
+    let f = write_temp_toml(&toml);
+    let err = Config::load(f.path()).expect_err("unsafe branch_prefix must be rejected");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("branch_prefix"),
+        "error should mention branch_prefix: {msg}"
+    );
+}
+
+#[test]
+fn test_load_rejects_unsafe_base_branch() {
+    let toml = minimal_toml_with_git_block(
+        r#"[git]
+branch_prefix = "feature"
+base_branch = "main;rm -rf /"
+"#,
+    );
+    let f = write_temp_toml(&toml);
+    let err = Config::load(f.path()).expect_err("unsafe base_branch must be rejected");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("base_branch"),
+        "error should mention base_branch: {msg}"
     );
 }

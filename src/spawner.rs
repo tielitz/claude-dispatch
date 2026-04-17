@@ -8,6 +8,35 @@ use crate::config::Config;
 use crate::state::StateDb;
 use crate::validate_ticket_key;
 
+/// Implementation prompt used when a dedicated git worktree is active.
+/// Claude Code is already on `{BRANCH}` (created from `{BASE_BRANCH}`), so the
+/// only instruction beyond "implement the plan" is to commit the work.
+/// `$CDP_PLAN_FILE` and `$CDP_TICKET_KEY` are bash variables exported by
+/// `spawn_tmux_session`; `{BRANCH}` and `{BASE_BRANCH}` are substituted at
+/// spawn time from validated config values.
+const IMPLEMENT_PROMPT_WORKTREE: &str = "\"Implement the plan in @$CDP_PLAN_FILE\n\n\
+     You are already on branch {BRANCH} (created from {BASE_BRANCH}). When done, \
+     commit your work with a message prefixed by the ticket key, e.g. \
+     '$CDP_TICKET_KEY: <brief description>'. Do NOT push any branch.\"";
+
+/// Implementation prompt used when worktrees are disabled. Assumes the plan
+/// itself lists the service directories (independent git repos) that need to
+/// be modified. Guidance is intentionally higher-level than imperative shell
+/// so Claude can reason about stash/clean state instead of blindly pulling
+/// over local WIP.
+const IMPLEMENT_PROMPT_MULTI_SERVICE: &str = "\"Implement the plan in @$CDP_PLAN_FILE\n\n\
+     Git workflow — apply this to the directory of each service you modify:\n\
+     1. cd into the service directory.\n\
+     2. Ensure you are working from an up-to-date {BASE_BRANCH} checkout; stash or \
+     commit any unrelated local changes first.\n\
+     3. Create branch {BRANCH} if it doesn't exist, or switch to it if it does. \
+     If a stale {BRANCH} already exists from a prior run, rebase it onto {BASE_BRANCH} \
+     before continuing.\n\
+     4. Implement the changes for that service.\n\
+     5. Commit with a message prefixed by the ticket key, e.g. \
+     '$CDP_TICKET_KEY: <brief description>'.\n\
+     Repeat for each service you modify. Do NOT push any branch.\"";
+
 /// Main loop: sleep, then poll for planned tickets, forever.
 pub async fn run_spawner_loop(
     config: Config,
@@ -224,13 +253,24 @@ fn shell_escape(s: &str) -> String {
 fn build_claude_args(config: &Config, ticket_key: &str) -> Vec<String> {
     let mut elements: Vec<String> = Vec::new();
 
-    if config.worktree.enabled {
-        let branch = config.branch_for_ticket(ticket_key);
+    let branch = config.branch_for_ticket(ticket_key);
+    let base_branch = &config.git.base_branch;
+
+    let template = if config.worktree.enabled {
         elements.push(shell_escape("--worktree"));
         elements.push(shell_escape(&branch));
-    }
+        IMPLEMENT_PROMPT_WORKTREE
+    } else {
+        IMPLEMENT_PROMPT_MULTI_SERVICE
+    };
 
-    elements.push("\"Implement the plan in @$CDP_PLAN_FILE\"".to_string());
+    // $CDP_PLAN_FILE and $CDP_TICKET_KEY expand at runtime from tmux env vars.
+    // {BRANCH}/{BASE_BRANCH} placeholders are substituted from config; the
+    // config loader validates the charset so they cannot carry shell metachars.
+    let prompt = template
+        .replace("{BRANCH}", &branch)
+        .replace("{BASE_BRANCH}", base_branch);
+    elements.push(prompt);
 
     if !config.claude.extra_flags.is_empty() {
         for flag in config.claude.extra_flags.split_whitespace() {
@@ -436,6 +476,86 @@ claude {claude_args_str}
         assert!(
             joined.contains("@$CDP_PLAN_FILE"),
             "prompt should reference plan file via @<path>: {joined}"
+        );
+    }
+
+    // --- prompt template selection & placeholder substitution ---
+
+    #[test]
+    fn test_prompt_contains_git_workflow_when_worktree_disabled() {
+        let config = test_config("", false);
+        let args = build_claude_args(&config, "PROJ-7");
+        let prompt = args.last().expect("prompt is last arg");
+        assert!(
+            prompt.contains("cd into the service directory"),
+            "multi-service workflow missing: {prompt}"
+        );
+        // Validated charset guarantees these substitute as-is.
+        assert!(prompt.contains("feature/proj-7"));
+        assert!(prompt.contains("main"));
+        // The old hardcoded example should not leak into the prompt.
+        assert!(!prompt.contains("services/Puzzle"));
+    }
+
+    #[test]
+    fn test_prompt_skips_git_workflow_when_worktree_enabled() {
+        let config = test_config("", true);
+        let args = build_claude_args(&config, "PROJ-7");
+        let prompt = args.last().expect("prompt is last arg");
+        assert!(
+            prompt.contains("You are already on branch feature/proj-7"),
+            "worktree prompt missing branch callout: {prompt}"
+        );
+        // The per-service loop must not appear — --worktree already handled branching.
+        assert!(
+            !prompt.contains("cd into the service directory"),
+            "multi-service workflow should not appear when worktree is enabled: {prompt}"
+        );
+    }
+
+    #[test]
+    fn test_prompt_interpolates_branch_and_base_from_config() {
+        let toml_str = r#"
+[jira]
+instance = "acme"
+email = "dev@acme.com"
+api_token = "token"
+jql = 'status = "In Progress"'
+
+[claude]
+home_dir = "~/.claude"
+
+[paths]
+output_dir = "/tmp/tickets"
+repo_root = "/tmp/repo"
+
+[git]
+branch_prefix = "hotfix"
+base_branch = "release-1.2"
+
+[worktree]
+enabled = false
+
+[tmux]
+
+[spawner]
+"#;
+        let config: Config = toml::from_str(toml_str).expect("parse test config");
+        let args = build_claude_args(&config, "PROJ-9");
+        let prompt = args.last().expect("prompt is last arg");
+        assert!(prompt.contains("hotfix/proj-9"), "branch missing: {prompt}");
+        assert!(
+            prompt.contains("release-1.2"),
+            "base_branch missing: {prompt}"
+        );
+        // No unsubstituted placeholders left over.
+        assert!(
+            !prompt.contains("{BRANCH}"),
+            "{{BRANCH}} left unsubstituted"
+        );
+        assert!(
+            !prompt.contains("{BASE_BRANCH}"),
+            "{{BASE_BRANCH}} left unsubstituted"
         );
     }
 }
