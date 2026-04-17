@@ -1027,6 +1027,87 @@ repo_root = "/tmp/repo"
     assert!(err.to_string().contains("log_level"), "{err}");
 }
 
+// --- CLI flag parsing (Task 8) ---
+
+#[test]
+fn test_cli_parse_config_flag() {
+    use clap::Parser;
+    use claude_dispatch::Cli;
+
+    let cli = Cli::try_parse_from(["claude-dispatch", "-c", "foo.toml"]).expect("parse -c");
+    assert_eq!(
+        cli.config.as_deref(),
+        Some(std::path::Path::new("foo.toml"))
+    );
+    assert!(!cli.init);
+    assert!(!cli.print_config);
+}
+
+#[test]
+fn test_cli_parse_long_config_flag() {
+    use clap::Parser;
+    use claude_dispatch::Cli;
+
+    let cli =
+        Cli::try_parse_from(["claude-dispatch", "--config", "bar.toml"]).expect("parse --config");
+    assert_eq!(
+        cli.config.as_deref(),
+        Some(std::path::Path::new("bar.toml"))
+    );
+}
+
+#[test]
+fn test_cli_parse_init_flag() {
+    use clap::Parser;
+    use claude_dispatch::Cli;
+
+    let cli = Cli::try_parse_from(["claude-dispatch", "--init"]).expect("parse --init");
+    assert!(cli.init);
+    assert!(cli.config.is_none());
+}
+
+#[test]
+fn test_cli_parse_print_config_flag() {
+    use clap::Parser;
+    use claude_dispatch::Cli;
+
+    let cli =
+        Cli::try_parse_from(["claude-dispatch", "--print-config"]).expect("parse --print-config");
+    assert!(cli.print_config);
+}
+
+#[test]
+fn test_cli_default_config_is_none() {
+    use clap::Parser;
+    use claude_dispatch::Cli;
+
+    let cli = Cli::try_parse_from(["claude-dispatch"]).expect("parse no args");
+    assert!(
+        cli.config.is_none(),
+        "config should default to None (triggers layered search)"
+    );
+    assert!(!cli.init);
+    assert!(!cli.print_config);
+}
+
+#[test]
+fn test_init_writes_template_to_user_config_path() {
+    use claude_dispatch::config::{user_config_path, write_template};
+
+    let _lock = ENV_LOCK.lock().unwrap();
+    let _cleanup = clear_all_claude_dispatch_env();
+
+    let tmp_home = tempfile::tempdir().expect("tempdir");
+    let _hg = EnvGuard::set("HOME", tmp_home.path().to_str().unwrap());
+
+    let path = user_config_path().expect("user config path");
+    write_template(&path).expect("write template");
+    assert!(path.exists());
+    let content = std::fs::read_to_string(&path).expect("read back");
+    let expected = include_str!("../config.example.toml");
+    assert_eq!(content, expected);
+}
+
 #[test]
 fn test_validation_rejects_zero_fetch_limit() {
     let _lock = ENV_LOCK.lock().unwrap();

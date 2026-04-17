@@ -1,13 +1,30 @@
 use clap::Parser;
-use claude_dispatch::config::{Config, ConfigError};
+use claude_dispatch::config::{Config, ConfigError, user_config_path, write_template};
 use claude_dispatch::{Cli, Commands, handle_mark_done, run_pipeline, validate_ticket_key};
 
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
 
-    // Load config
-    let mut config = match Config::load(Some(cli.config.as_path())) {
+    // --init: write template to user config dir and exit 0.
+    if cli.init {
+        let path = match user_config_path() {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("Failed to resolve user config directory: {e}");
+                std::process::exit(1);
+            }
+        };
+        if let Err(e) = write_template(&path) {
+            eprintln!("Failed to write template to {}: {e}", path.display());
+            std::process::exit(1);
+        }
+        println!("Wrote template to {}", path.display());
+        return;
+    }
+
+    // Load config (layered).
+    let mut config = match Config::load(cli.config.as_deref()) {
         Ok(cfg) => cfg,
         Err(ConfigError::WizardBootstrap(path)) => {
             eprintln!("No configuration file found.");
@@ -18,11 +35,17 @@ async fn main() {
             std::process::exit(2);
         }
         Err(e) => {
-            eprintln!("Failed to load config from {}: {}", cli.config.display(), e);
+            eprintln!("Config error: {e}");
             std::process::exit(1);
         }
     };
     config.debug = cli.debug;
+
+    // --print-config: print (secrets redacted via Debug impl) and exit 0.
+    if cli.print_config {
+        println!("{config:#?}");
+        return;
+    }
 
     // Create directories
     let state_dir = config.state_dir();

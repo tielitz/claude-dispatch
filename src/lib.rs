@@ -34,13 +34,21 @@ pub fn validate_ticket_key(key: &str) -> bool {
 #[command(name = "claude-dispatch")]
 #[command(about = "Automated Jira-to-Claude Code implementation pipeline")]
 pub struct Cli {
-    /// Path to config file
-    #[arg(long, default_value = "config.toml")]
-    pub config: PathBuf,
+    /// Explicit config path. Skips default search (user config dir + binary-adjacent).
+    #[arg(short = 'c', long, value_name = "PATH")]
+    pub config: Option<PathBuf>,
 
     /// Stream planner Claude output to the terminal
     #[arg(long)]
     pub debug: bool,
+
+    /// Print the merged config (secrets redacted) and exit.
+    #[arg(long)]
+    pub print_config: bool,
+
+    /// Write a fresh template to the user config dir and exit.
+    #[arg(long)]
+    pub init: bool,
 
     #[command(subcommand)]
     pub command: Option<Commands>,
