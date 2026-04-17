@@ -6,7 +6,7 @@ async fn main() {
     let cli = Cli::parse();
 
     // Load config
-    let mut config = match claude_dispatch::config::Config::load(&cli.config) {
+    let mut config = match claude_dispatch::config::Config::load(Some(cli.config.as_path())) {
         Ok(cfg) => cfg,
         Err(e) => {
             eprintln!("Failed to load config from {}: {}", cli.config.display(), e);

@@ -45,7 +45,7 @@ session_name = "my-pipeline"
 poll_interval_secs = 30
 "#;
     let f = write_temp_toml(toml);
-    let cfg = Config::load(f.path()).expect("parse full config");
+    let cfg = Config::load(Some(f.path())).expect("parse full config");
 
     assert_eq!(cfg.jira.instance, "acme");
     assert_eq!(cfg.jira.email, "dev@acme.com");
@@ -96,7 +96,7 @@ repo_root = "~/projects/repo"
 [spawner]
 "#;
     let f = write_temp_toml(toml);
-    let cfg = Config::load(f.path()).expect("parse minimal config");
+    let cfg = Config::load(Some(f.path())).expect("parse minimal config");
 
     // Defaults
     assert_eq!(cfg.jira.cron_schedule, "0 */5 * * * *");
@@ -152,7 +152,7 @@ repo_root = "/tmp/repo"
 [spawner]
 "#;
     let f = write_temp_toml(toml);
-    let cfg = Config::load(f.path()).expect("parse config");
+    let cfg = Config::load(Some(f.path())).expect("parse config");
     assert_eq!(cfg.jira_base_url(), "https://acme.atlassian.net");
 }
 
@@ -179,7 +179,7 @@ repo_root = "/tmp/repo"
 [spawner]
 "#;
     let f = write_temp_toml(toml);
-    let cfg = Config::load(f.path()).expect("parse config");
+    let cfg = Config::load(Some(f.path())).expect("parse config");
     assert_eq!(cfg.jira_base_url(), "https://mercedes-benz.atlassian.net");
 }
 
@@ -206,7 +206,7 @@ repo_root = "/tmp/repo"
 [spawner]
 "#;
     let f = write_temp_toml(toml);
-    let cfg = Config::load(f.path()).expect("parse config");
+    let cfg = Config::load(Some(f.path())).expect("parse config");
     assert_eq!(cfg.jira_base_url(), "https://example.atlassian.net");
 }
 
@@ -235,7 +235,7 @@ repo_root = "/tmp/repo"
 [spawner]
 "#;
     let f = write_temp_toml(toml);
-    let cfg = Config::load(f.path()).expect("parse config");
+    let cfg = Config::load(Some(f.path())).expect("parse config");
 
     let debug_output = format!("{:?}", cfg.jira);
 
@@ -283,7 +283,7 @@ repo_root = "/tmp/repo"
 [spawner]
 "#;
     let f = write_temp_toml(toml);
-    let cfg = Config::load(f.path()).expect("parse config");
+    let cfg = Config::load(Some(f.path())).expect("parse config");
 
     // When the full Config is debug-printed, the nested JiraConfig
     // must still redact the token
@@ -334,7 +334,7 @@ base_branch = "main"
 "#,
     );
     let f = write_temp_toml(&toml);
-    let err = Config::load(f.path()).expect_err("unsafe branch_prefix must be rejected");
+    let err = Config::load(Some(f.path())).expect_err("unsafe branch_prefix must be rejected");
     let msg = err.to_string();
     assert!(
         msg.contains("branch_prefix"),
@@ -351,10 +351,50 @@ base_branch = "main;rm -rf /"
 "#,
     );
     let f = write_temp_toml(&toml);
-    let err = Config::load(f.path()).expect_err("unsafe base_branch must be rejected");
+    let err = Config::load(Some(f.path())).expect_err("unsafe base_branch must be rejected");
     let msg = err.to_string();
     assert!(
         msg.contains("base_branch"),
         "error should mention base_branch: {msg}"
     );
+}
+
+#[test]
+fn test_config_error_variants_format() {
+    use claude_dispatch::config::ConfigError;
+    use std::path::PathBuf;
+
+    let io = ConfigError::Io {
+        path: PathBuf::from("/tmp/foo.toml"),
+        source: std::io::Error::from(std::io::ErrorKind::NotFound),
+    };
+    assert!(io.to_string().contains("/tmp/foo.toml"));
+    assert!(io.to_string().contains("failed to read"));
+
+    let env = ConfigError::EnvCoerce {
+        var: "CLAUDE_DISPATCH_FOO".into(),
+        ty: "bool",
+        value: "notabool".into(),
+    };
+    let s = env.to_string();
+    assert!(s.contains("CLAUDE_DISPATCH_FOO"));
+    assert!(s.contains("bool"));
+    assert!(s.contains("notabool"));
+
+    let unknown = ConfigError::UnknownSchemaVersion {
+        found: 99,
+        supported: &[1],
+    };
+    assert!(unknown.to_string().contains("99"));
+
+    let val = ConfigError::Validation(vec!["a is bad".into(), "b is worse".into()]);
+    let s = val.to_string();
+    assert!(s.contains("a is bad"));
+    assert!(s.contains("b is worse"));
+
+    let wiz = ConfigError::WizardBootstrap(PathBuf::from("/tmp/cfg"));
+    assert!(wiz.to_string().contains("/tmp/cfg"));
+
+    let nod = ConfigError::NoUserConfigDir;
+    assert!(!nod.to_string().is_empty());
 }
