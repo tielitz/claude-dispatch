@@ -1,12 +1,69 @@
 use std::io::Write as _;
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 use claude_dispatch::config::{Config, expand_path};
+use once_cell::sync::Lazy;
 
 fn write_temp_toml(content: &str) -> tempfile::NamedTempFile {
     let mut f = tempfile::NamedTempFile::new().expect("create temp file");
     f.write_all(content.as_bytes()).expect("write toml");
     f
+}
+
+/// Serializes tests that mutate process-wide env vars.
+static ENV_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+struct EnvGuard {
+    key: String,
+    prev: Option<String>,
+}
+
+impl EnvGuard {
+    fn set(key: &str, value: &str) -> Self {
+        let prev = std::env::var(key).ok();
+        // SAFETY: tests holding ENV_LOCK are the only env-mutating code path.
+        unsafe {
+            std::env::set_var(key, value);
+        }
+        Self {
+            key: key.to_string(),
+            prev,
+        }
+    }
+
+    fn unset(key: &str) -> Self {
+        let prev = std::env::var(key).ok();
+        // SAFETY: same as set().
+        unsafe {
+            std::env::remove_var(key);
+        }
+        Self {
+            key: key.to_string(),
+            prev,
+        }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        // SAFETY: same as set().
+        unsafe {
+            match &self.prev {
+                Some(v) => std::env::set_var(&self.key, v),
+                None => std::env::remove_var(&self.key),
+            }
+        }
+    }
+}
+
+/// Helper: unset all CLAUDE_DISPATCH_* env vars so a test starts clean.
+/// Returns guards that restore prior values on drop.
+fn clear_all_claude_dispatch_env() -> Vec<EnvGuard> {
+    std::env::vars()
+        .filter(|(k, _)| k.starts_with("CLAUDE_DISPATCH_"))
+        .map(|(k, _)| EnvGuard::unset(&k))
+        .collect()
 }
 
 #[test]
@@ -466,4 +523,172 @@ fn test_binary_adjacent_config_path_matches_exe_dir() {
         exe.parent().expect("exe must have parent"),
         "binary-adjacent path must be sibling of exe"
     );
+}
+
+// --- Env var overlay (Task 4) ---
+
+#[test]
+fn test_env_overrides_file_value() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let _cleanup = clear_all_claude_dispatch_env();
+
+    let toml = r#"
+[jira]
+instance = "acme"
+email = "a@b"
+api_token = "token"
+jql = 'status = "In Progress"'
+
+[claude]
+home_dir = "~/.claude"
+
+[paths]
+output_dir = "/tmp/tickets"
+repo_root = "/tmp/repo"
+
+[worktree]
+
+[tmux]
+
+[spawner]
+"#;
+    let f = write_temp_toml(toml);
+    let _g = EnvGuard::set("CLAUDE_DISPATCH_JIRA__EMAIL", "c@d");
+    let cfg = Config::load(Some(f.path())).expect("load with env overlay");
+    assert_eq!(cfg.jira.email, "c@d");
+    assert_eq!(cfg.jira.instance, "acme"); // file value still present
+}
+
+#[test]
+fn test_env_nesting_double_underscore() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let _cleanup = clear_all_claude_dispatch_env();
+
+    let toml = r#"
+[jira]
+instance = "acme"
+email = "a@b"
+api_token = "token"
+jql = 'status = "In Progress"'
+
+[claude]
+home_dir = "~/.claude"
+
+[paths]
+output_dir = "/tmp/tickets"
+repo_root = "/tmp/repo"
+
+[worktree]
+
+[tmux]
+
+[spawner]
+poll_interval_secs = 10
+"#;
+    let f = write_temp_toml(toml);
+    let _g = EnvGuard::set("CLAUDE_DISPATCH_SPAWNER__POLL_INTERVAL_SECS", "99");
+    let cfg = Config::load(Some(f.path())).expect("load with nested env");
+    assert_eq!(cfg.spawner.poll_interval_secs, 99);
+}
+
+#[test]
+fn test_env_coerces_bool_and_int() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let _cleanup = clear_all_claude_dispatch_env();
+
+    let toml = r#"
+[jira]
+instance = "acme"
+email = "a@b"
+api_token = "token"
+jql = 'status = "In Progress"'
+fetch_limit = 5
+
+[claude]
+home_dir = "~/.claude"
+
+[paths]
+output_dir = "/tmp/tickets"
+repo_root = "/tmp/repo"
+
+[worktree]
+enabled = true
+
+[tmux]
+
+[spawner]
+"#;
+    let f = write_temp_toml(toml);
+    let _g1 = EnvGuard::set("CLAUDE_DISPATCH_WORKTREE__ENABLED", "false");
+    let _g2 = EnvGuard::set("CLAUDE_DISPATCH_JIRA__FETCH_LIMIT", "7");
+    let cfg = Config::load(Some(f.path())).expect("load with coercion");
+    assert!(!cfg.worktree.enabled);
+    assert_eq!(cfg.jira.fetch_limit, 7);
+}
+
+#[test]
+fn test_env_non_matching_prefix_ignored() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let _cleanup = clear_all_claude_dispatch_env();
+
+    let toml = r#"
+[jira]
+instance = "acme"
+email = "a@b"
+api_token = "token"
+jql = 'status = "In Progress"'
+
+[claude]
+home_dir = "~/.claude"
+
+[paths]
+output_dir = "/tmp/tickets"
+repo_root = "/tmp/repo"
+
+[worktree]
+
+[tmux]
+
+[spawner]
+"#;
+    let f = write_temp_toml(toml);
+    // Unrelated env vars should not appear.
+    let _g1 = EnvGuard::set("OTHER_VAR", "foo");
+    let _g2 = EnvGuard::set("FOO_BAR", "bar");
+    let cfg = Config::load(Some(f.path())).expect("load ignores non-matching env");
+    // No assertion needed beyond successful load; we're making sure collection didn't
+    // accidentally merge something named "foo" or "other" into the config root.
+    assert_eq!(cfg.jira.email, "a@b");
+}
+
+#[test]
+fn test_env_only_load_succeeds_with_all_required() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let _cleanup = clear_all_claude_dispatch_env();
+
+    // Use a bogus HOME so user_config_path points somewhere that doesn't exist.
+    // (ProjectDirs consults HOME on Unix.)
+    let tmp_home = tempfile::tempdir().expect("tempdir");
+    let _hg = EnvGuard::set("HOME", tmp_home.path().to_str().unwrap());
+
+    // No -c flag, no file at user_config_path. Supply all required fields via env.
+    // `worktree`, `tmux`, `spawner` sections are required to exist in the Config
+    // schema (their inner fields have defaults, but the parent tables don't), so
+    // we seed one field in each to materialize them.
+    let guards = vec![
+        EnvGuard::set("CLAUDE_DISPATCH_JIRA__INSTANCE", "acme"),
+        EnvGuard::set("CLAUDE_DISPATCH_JIRA__EMAIL", "e@f"),
+        EnvGuard::set("CLAUDE_DISPATCH_JIRA__API_TOKEN", "tok"),
+        EnvGuard::set("CLAUDE_DISPATCH_JIRA__JQL", "status"),
+        EnvGuard::set("CLAUDE_DISPATCH_CLAUDE__HOME_DIR", "~/.claude"),
+        EnvGuard::set("CLAUDE_DISPATCH_PATHS__OUTPUT_DIR", "/tmp/tickets"),
+        EnvGuard::set("CLAUDE_DISPATCH_PATHS__REPO_ROOT", "/tmp/repo"),
+        EnvGuard::set("CLAUDE_DISPATCH_WORKTREE__ENABLED", "true"),
+        EnvGuard::set("CLAUDE_DISPATCH_TMUX__SESSION_NAME", "dev-pipeline"),
+        EnvGuard::set("CLAUDE_DISPATCH_SPAWNER__POLL_INTERVAL_SECS", "10"),
+    ];
+    let cfg = Config::load(None).expect("env-only load should succeed");
+    assert_eq!(cfg.jira.instance, "acme");
+    assert_eq!(cfg.jira.email, "e@f");
+    drop(guards);
 }

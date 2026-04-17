@@ -4,8 +4,10 @@ use std::path::{Path, PathBuf};
 
 pub fn load(cli: Option<&Path>) -> Result<Config, ConfigError> {
     let sources = resolve_file_sources(cli);
+    let env = collect_env();
+    let env_empty = env.as_table().map(|t| t.is_empty()).unwrap_or(true);
 
-    if sources.is_empty() {
+    if cli.is_none() && sources.is_empty() && env_empty {
         // Task 5 replaces this with wizard bootstrap.
         return Err(ConfigError::Io {
             path: paths::user_config_path()?,
@@ -25,6 +27,8 @@ pub fn load(cli: Option<&Path>) -> Result<Config, ConfigError> {
         })?;
         merge_toml(&mut merged, layer);
     }
+
+    merge_toml(&mut merged, env);
 
     let last_path = sources.last().cloned();
     let mut cfg: Config = merged
@@ -67,6 +71,51 @@ pub(crate) fn merge_toml(base: &mut toml::Value, overlay: toml::Value) {
             }
         }
         (slot, other) => *slot = other,
+    }
+}
+
+fn collect_env() -> toml::Value {
+    let mut root = toml::value::Table::new();
+    for (k, v) in std::env::vars() {
+        let Some(rest) = k.strip_prefix("CLAUDE_DISPATCH_") else {
+            continue;
+        };
+        let path: Vec<String> = rest.split("__").map(|s| s.to_ascii_lowercase()).collect();
+        if path.is_empty() || path.iter().any(String::is_empty) {
+            continue;
+        }
+        let val = parse_env_value(&v);
+        insert_nested(&mut root, &path, val);
+    }
+    toml::Value::Table(root)
+}
+
+fn parse_env_value(s: &str) -> toml::Value {
+    if let Ok(b) = s.parse::<bool>() {
+        return toml::Value::Boolean(b);
+    }
+    if let Ok(i) = s.parse::<i64>() {
+        return toml::Value::Integer(i);
+    }
+    toml::Value::String(s.to_string())
+}
+
+fn insert_nested(table: &mut toml::value::Table, path: &[String], value: toml::Value) {
+    match path {
+        [] => {}
+        [only] => {
+            table.insert(only.clone(), value);
+        }
+        [head, tail @ ..] => {
+            let entry = table
+                .entry(head.clone())
+                .or_insert(toml::Value::Table(Default::default()));
+            if let toml::Value::Table(sub) = entry {
+                insert_nested(sub, tail, value);
+            }
+            // If entry existed and wasn't a table, silently drop — env shouldn't
+            // change the shape of an already-set node. This is a noop (defensive).
+        }
     }
 }
 
