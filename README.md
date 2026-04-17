@@ -115,7 +115,7 @@ tmux attach -t dev-pipeline
 
 ### First-run wizard
 
-If no config file exists in the user-config or binary-adjacent locations (and no env vars are set), the binary writes `config.example.toml` to the per-OS user config path, prints a message pointing at the new file, and exits with status `2`. Edit the template with your Jira credentials and run again.
+If no config file exists in the user-config or binary-adjacent locations (and no env vars are set), the binary writes a `config.toml` template to the per-OS user config path, prints a message pointing at the new file, and exits with status `2`. Edit it with your Jira credentials and run again.
 
 You can also bootstrap a template manually at any time:
 

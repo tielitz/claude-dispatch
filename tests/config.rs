@@ -68,6 +68,9 @@ fn clear_all_claude_dispatch_env() -> Vec<EnvGuard> {
 
 #[test]
 fn test_parse_full_config() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let _cleanup = clear_all_claude_dispatch_env();
+
     let toml = r#"
 [jira]
 instance = "acme"
@@ -132,6 +135,9 @@ poll_interval_secs = 30
 
 #[test]
 fn test_parse_minimal_config_with_defaults() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let _cleanup = clear_all_claude_dispatch_env();
+
     let toml = r#"
 [jira]
 instance = "acme"
@@ -188,6 +194,9 @@ fn test_expand_path_absolute() {
 
 #[test]
 fn test_jira_base_url_from_short_name() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let _cleanup = clear_all_claude_dispatch_env();
+
     let toml = r#"
 [jira]
 instance = "acme"
@@ -215,6 +224,9 @@ repo_root = "/tmp/repo"
 
 #[test]
 fn test_jira_base_url_from_full_url() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let _cleanup = clear_all_claude_dispatch_env();
+
     let toml = r#"
 [jira]
 instance = "https://mercedes-benz.atlassian.net"
@@ -242,6 +254,9 @@ repo_root = "/tmp/repo"
 
 #[test]
 fn test_jira_base_url_strips_trailing_slash() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let _cleanup = clear_all_claude_dispatch_env();
+
     let toml = r#"
 [jira]
 instance = "https://example.atlassian.net/"
@@ -271,6 +286,9 @@ repo_root = "/tmp/repo"
 
 #[test]
 fn test_jira_config_debug_redacts_api_token() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let _cleanup = clear_all_claude_dispatch_env();
+
     let toml = r#"
 [jira]
 instance = "acme"
@@ -319,6 +337,9 @@ repo_root = "/tmp/repo"
 
 #[test]
 fn test_full_config_debug_redacts_api_token() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let _cleanup = clear_all_claude_dispatch_env();
+
     let toml = r#"
 [jira]
 instance = "acme"
@@ -384,6 +405,9 @@ repo_root = "/tmp/repo"
 
 #[test]
 fn test_load_rejects_unsafe_branch_prefix() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let _cleanup = clear_all_claude_dispatch_env();
+
     let toml = minimal_toml_with_git_block(
         r#"[git]
 branch_prefix = "feat$(whoami)"
@@ -401,6 +425,9 @@ base_branch = "main"
 
 #[test]
 fn test_load_rejects_unsafe_base_branch() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let _cleanup = clear_all_claude_dispatch_env();
+
     let toml = minimal_toml_with_git_block(
         r#"[git]
 branch_prefix = "feature"
@@ -479,6 +506,9 @@ fn test_user_config_path_is_absolute_and_under_home() {
 
 #[test]
 fn test_cli_path_loads_specified_file() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let _cleanup = clear_all_claude_dispatch_env();
+
     let toml = r#"
 [jira]
 instance = "acme"
@@ -761,6 +791,9 @@ fn test_wizard_not_triggered_when_cli_provided() {
 
 #[test]
 fn test_schema_version_1_loads() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let _cleanup = clear_all_claude_dispatch_env();
+
     let toml = r#"
 schema_version = 1
 
@@ -790,6 +823,9 @@ repo_root = "/tmp/repo"
 
 #[test]
 fn test_missing_schema_version_defaults_to_1() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let _cleanup = clear_all_claude_dispatch_env();
+
     let toml = r#"
 [jira]
 instance = "acme"
@@ -817,6 +853,9 @@ repo_root = "/tmp/repo"
 
 #[test]
 fn test_unknown_schema_version_errors() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let _cleanup = clear_all_claude_dispatch_env();
+
     let toml = r#"
 schema_version = 999
 
