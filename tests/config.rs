@@ -938,6 +938,48 @@ repo_root = "/tmp/repo"
 }
 
 #[test]
+fn test_unknown_schema_version_via_env_errors() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let _cleanup = clear_all_claude_dispatch_env();
+
+    // Regression: env vars arrive as toml::Value::String, but schema_version
+    // extraction in loader.rs previously only consulted as_integer(), which
+    // returns None for strings — so the unknown-version guard was bypassed
+    // and Config.schema_version silently took the env value (parsed by
+    // from_str_or_native). Loader now also accepts a parseable string here.
+    let toml = r#"
+[jira]
+instance = "acme"
+email = "a@b"
+api_token = "token"
+jql = 'status = "In Progress"'
+
+[claude]
+home_dir = "~/.claude"
+
+[paths]
+output_dir = "/tmp/tickets"
+repo_root = "/tmp/repo"
+
+[worktree]
+
+[tmux]
+
+[spawner]
+"#;
+    let f = write_temp_toml(toml);
+    let _g = EnvGuard::set("CLAUDE_DISPATCH_SCHEMA_VERSION", "999");
+    let err = Config::load(Some(f.path())).expect_err("env-set schema_version 999 must fail");
+    match err {
+        ConfigError::UnknownSchemaVersion { found, supported } => {
+            assert_eq!(found, 999);
+            assert_eq!(supported, &[1]);
+        }
+        other => panic!("expected UnknownSchemaVersion, got {:?}", other),
+    }
+}
+
+#[test]
 fn test_wizard_not_triggered_when_env_provides_config() {
     let _lock = ENV_LOCK.lock().unwrap();
     let _cleanup = clear_all_claude_dispatch_env();

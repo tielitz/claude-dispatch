@@ -28,9 +28,18 @@ pub fn load(cli: Option<&Path>) -> Result<Config, ConfigError> {
 
     merge_toml(&mut merged, env);
 
+    // Accept both the native TOML integer (from files) and a stringified
+    // value (from env vars — `collect_env` always inserts `Value::String`).
+    // Without the string fallback, `CLAUDE_DISPATCH_SCHEMA_VERSION=999`
+    // would silently default to 1 here and bypass the unknown-version guard
+    // even though `from_str_or_native::deserialize` correctly parses it into
+    // `Config::schema_version` later.
     let raw_version = merged
         .get("schema_version")
-        .and_then(|v| v.as_integer())
+        .and_then(|v| {
+            v.as_integer()
+                .or_else(|| v.as_str().and_then(|s| s.parse::<i64>().ok()))
+        })
         .unwrap_or(1) as u32;
     crate::config::migrate::run(&mut merged, raw_version)?;
 
