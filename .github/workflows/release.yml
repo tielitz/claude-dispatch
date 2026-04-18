@@ -55,10 +55,24 @@ jobs:
       - name: Verify tag does not already exist
         run: |
           tag="v${{ steps.validate.outputs.version }}"
-          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
-            echo "::error::Tag $tag already exists on origin"
+          # Local check: checkout with fetch-depth: 0 pulls all tags.
+          if git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null; then
+            echo "::error::Tag $tag already exists locally"
             exit 1
           fi
+          # Remote check: catches tags created on origin since checkout and
+          # distinguishes "tag exists" (rc=0) from "tag absent" (rc=2) from
+          # "network/auth failure" (anything else) so transient errors fail
+          # loudly instead of letting the pipeline proceed.
+          set +e
+          git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1
+          rc=$?
+          set -e
+          case $rc in
+            0) echo "::error::Tag $tag already exists on origin"; exit 1 ;;
+            2) ;;
+            *) echo "::error::Failed to query origin for tag $tag (git ls-remote exit $rc)"; exit 1 ;;
+          esac
 
       - uses: dtolnay/rust-toolchain@stable
 
