@@ -34,15 +34,20 @@ pub fn load(cli: Option<&Path>) -> Result<Config, ConfigError> {
         .unwrap_or(1) as u32;
     crate::config::migrate::run(&mut merged, raw_version)?;
 
-    let last_path = sources.last().cloned();
+    let parse_path = sources.last().cloned();
     let mut cfg: Config = merged
         .try_into()
         .map_err(|e: toml::de::Error| ConfigError::Parse {
-            path: last_path.clone().unwrap_or_default(),
+            path: parse_path.unwrap_or_default(),
             source: e,
         })?;
-    if let Some(p) = last_path {
-        cfg.config_path = Some(p.canonicalize().unwrap_or(p));
+    // `config_path` is only set when the user passed `-c` explicitly. With the
+    // layered loader, no single file represents the "effective" config — leaving
+    // it `None` lets sub-invocations (e.g. the spawner's `mark-done` wrapper)
+    // re-discover the same layered sources rather than fixate on whichever file
+    // happened to be last in the merge order.
+    if let Some(p) = cli {
+        cfg.config_path = Some(p.canonicalize().unwrap_or_else(|_| p.to_path_buf()));
     }
     crate::config::validate::run(&cfg)?;
     Ok(cfg)
@@ -88,20 +93,13 @@ fn collect_env() -> toml::Value {
         if path.is_empty() || path.iter().any(String::is_empty) {
             continue;
         }
-        let val = parse_env_value(&v);
-        insert_nested(&mut root, &path, val);
+        // Env values are always strings — schema fields that target bool/u32/u64
+        // accept either via `from_str_or_native`. This avoids silently coercing
+        // a string field set to "true" into a Boolean and producing an opaque
+        // type-mismatch later.
+        insert_nested(&mut root, &path, toml::Value::String(v));
     }
     toml::Value::Table(root)
-}
-
-fn parse_env_value(s: &str) -> toml::Value {
-    if let Ok(b) = s.parse::<bool>() {
-        return toml::Value::Boolean(b);
-    }
-    if let Ok(i) = s.parse::<i64>() {
-        return toml::Value::Integer(i);
-    }
-    toml::Value::String(s.to_string())
 }
 
 fn insert_nested(table: &mut toml::value::Table, path: &[String], value: toml::Value) {

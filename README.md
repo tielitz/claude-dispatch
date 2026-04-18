@@ -106,11 +106,13 @@ tmux attach -t dev-pipeline
    - macOS: `~/Library/Application Support/dev.claude-dispatch.claude-dispatch/config.toml`
    - Windows: `C:\Users\<user>\AppData\Roaming\claude-dispatch\claude-dispatch\config\config.toml`
 2. **Binary-adjacent** — `config.toml` next to the executable, e.g. `target/release/config.toml`.
+
+   ⚠️ **Heads-up for system installs:** because binary-adjacent overrides the user config, anyone who can write next to the binary (e.g. `/usr/local/bin/`) can override your settings. If you install the binary to a system path, ensure the directory's permissions are tight. For untrusted multi-user setups, prefer pinning the path with `-c` or distributing the binary somewhere only the operator controls.
 3. **Environment variables** — any var prefixed `CLAUDE_DISPATCH_` overlays on top of the file sources. Use `__` (double underscore) to nest into sections:
    - `CLAUDE_DISPATCH_JIRA__EMAIL=you@company.com`
    - `CLAUDE_DISPATCH_SPAWNER__POLL_INTERVAL_SECS=30`
 
-   Values are coerced in the order `bool → i64 → String`, so `"true"` becomes a boolean and `"42"` becomes an integer.
+   Env values are always strings; numeric and boolean fields (`fetch_limit`, `worktree.enabled`, `spawner.poll_interval_secs`, `schema_version`) accept either the native TOML type or a string parseable to it (so `"true"`, `"false"`, `"42"` all work). String fields like `jira.api_token` keep their value verbatim — `"true"` stays the literal string `"true"`.
 4. **`-c PATH` / `--config PATH`** — an explicit path that replaces both file-based defaults. Environment variables still overlay on top.
 
 ### First-run wizard

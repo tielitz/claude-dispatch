@@ -24,6 +24,19 @@ pub fn run(cfg: &Config) -> Result<(), ConfigError> {
 
     if cfg.jira.instance.trim().is_empty() {
         issues.push("jira.instance is empty".into());
+    } else {
+        // jira.instance is either a short name (e.g. "acme" → https://acme.atlassian.net)
+        // or a full URL (e.g. "https://acme.atlassian.net"). A schemeless FQDN
+        // like "acme.atlassian.net" silently produces "https://acme.atlassian.net.atlassian.net";
+        // catch it here.
+        let inst = cfg.jira.instance.trim();
+        let has_scheme = inst.starts_with("http://") || inst.starts_with("https://");
+        if !has_scheme && inst.contains('.') {
+            issues.push(format!(
+                "jira.instance looks like a hostname; prefix it with https:// (got {:?})",
+                cfg.jira.instance
+            ));
+        }
     }
     if !cfg.jira.email.contains('@') {
         issues.push(format!(

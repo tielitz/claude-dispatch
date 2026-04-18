@@ -1,6 +1,30 @@
 use serde::Deserialize;
 use std::path::PathBuf;
 
+/// Deserializer that accepts either the native TOML type or a string parseable
+/// to it. Used on numeric / bool fields so env-var overrides (which arrive as
+/// strings via `CLAUDE_DISPATCH_*`) round-trip without surprising users when
+/// their string value happens to look like another type.
+pub(crate) mod from_str_or_native {
+    use serde::{Deserialize, Deserializer};
+    use std::fmt::Display;
+    use std::str::FromStr;
+
+    pub fn deserialize<'de, T, D>(deserializer: D) -> Result<T, D::Error>
+    where
+        D: Deserializer<'de>,
+        T: FromStr + Deserialize<'de>,
+        T::Err: Display,
+    {
+        use serde::de::Error;
+        let v = toml::Value::deserialize(deserializer)?;
+        match v {
+            toml::Value::String(s) => s.parse::<T>().map_err(Error::custom),
+            other => other.try_into().map_err(Error::custom),
+        }
+    }
+}
+
 fn default_cron_schedule() -> String {
     "0 */5 * * * *".to_string()
 }
@@ -55,7 +79,10 @@ pub struct Config {
     pub config_path: Option<PathBuf>,
     #[serde(skip)]
     pub debug: bool,
-    #[serde(default = "default_schema_version")]
+    #[serde(
+        default = "default_schema_version",
+        deserialize_with = "from_str_or_native::deserialize"
+    )]
     pub schema_version: u32,
     #[serde(default = "default_log_level")]
     pub log_level: String,
@@ -74,7 +101,10 @@ pub struct JiraConfig {
     pub instance: String,
     pub email: String,
     pub api_token: String,
-    #[serde(default = "default_fetch_limit")]
+    #[serde(
+        default = "default_fetch_limit",
+        deserialize_with = "from_str_or_native::deserialize"
+    )]
     pub fetch_limit: u32,
     pub jql: String,
     /// Cron expression for the Jira sync schedule.
@@ -136,7 +166,10 @@ impl Default for GitConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct WorktreeConfig {
-    #[serde(default = "default_true")]
+    #[serde(
+        default = "default_true",
+        deserialize_with = "from_str_or_native::deserialize"
+    )]
     pub enabled: bool,
 }
 
@@ -148,7 +181,10 @@ pub struct TmuxConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct SpawnerConfig {
-    #[serde(default = "default_spawner_poll")]
+    #[serde(
+        default = "default_spawner_poll",
+        deserialize_with = "from_str_or_native::deserialize"
+    )]
     pub poll_interval_secs: u64,
 }
 

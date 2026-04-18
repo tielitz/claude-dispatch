@@ -177,7 +177,13 @@ else
     echo "[claude-dispatch] full log: $IMPL_LOG"
 fi
 
-"$CDP_BINARY" --config "$CDP_CONFIG_PATH" mark-done "$CDP_TICKET_KEY"
+# Only pass --config when the parent was launched with -c. Without it, the
+# child re-runs layered discovery and finds the same sources the parent did.
+if [ -n "$CDP_CONFIG_PATH" ]; then
+    "$CDP_BINARY" --config "$CDP_CONFIG_PATH" mark-done "$CDP_TICKET_KEY"
+else
+    "$CDP_BINARY" mark-done "$CDP_TICKET_KEY"
+fi
 
 echo ""
 echo "Closing in 10 seconds..."

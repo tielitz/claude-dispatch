@@ -473,16 +473,6 @@ fn test_config_error_variants_format() {
     assert!(io.to_string().contains("/tmp/foo.toml"));
     assert!(io.to_string().contains("failed to read"));
 
-    let env = ConfigError::EnvCoerce {
-        var: "CLAUDE_DISPATCH_FOO".into(),
-        ty: "bool",
-        value: "notabool".into(),
-    };
-    let s = env.to_string();
-    assert!(s.contains("CLAUDE_DISPATCH_FOO"));
-    assert!(s.contains("bool"));
-    assert!(s.contains("notabool"));
-
     let unknown = ConfigError::UnknownSchemaVersion {
         found: 99,
         supported: &[1],
@@ -675,6 +665,40 @@ enabled = true
 }
 
 #[test]
+fn test_env_string_field_with_boolish_value_round_trips() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let _cleanup = clear_all_claude_dispatch_env();
+
+    let toml = r#"
+[jira]
+instance = "acme"
+email = "a@b"
+api_token = "placeholder"
+jql = 'status = "In Progress"'
+
+[claude]
+home_dir = "~/.claude"
+
+[paths]
+output_dir = "/tmp/tickets"
+repo_root = "/tmp/repo"
+
+[worktree]
+
+[tmux]
+
+[spawner]
+"#;
+    let f = write_temp_toml(toml);
+    // Regression: prior to the env-coercion fix, this would deserialize as a
+    // TOML Boolean and fail with an opaque type-mismatch error against the
+    // String-typed api_token field.
+    let _g = EnvGuard::set("CLAUDE_DISPATCH_JIRA__API_TOKEN", "true");
+    let cfg = Config::load(Some(f.path())).expect("string field accepts boolish env value");
+    assert_eq!(cfg.jira.api_token, "true");
+}
+
+#[test]
 fn test_env_non_matching_prefix_ignored() {
     let _lock = ENV_LOCK.lock().unwrap();
     let _cleanup = clear_all_claude_dispatch_env();
@@ -737,6 +761,9 @@ fn test_env_only_load_succeeds_with_all_required() {
     let cfg = Config::load(None).expect("env-only load should succeed");
     assert_eq!(cfg.jira.instance, "acme");
     assert_eq!(cfg.jira.email, "e@f");
+    // No -c was passed, so config_path stays None — sub-invocations re-discover
+    // the layered sources rather than fixate on whichever file happened to win.
+    assert!(cfg.config_path.is_none());
     drop(guards);
 }
 
@@ -799,6 +826,13 @@ fn test_wizard_not_triggered_when_cli_provided() {
         ConfigError::Io { .. } => {}
         other => panic!("expected Io error for missing file, got {:?}", other),
     }
+    // Wizard must NOT have written a template — `-c` opts out of the bootstrap.
+    let user_cfg = claude_dispatch::config::user_config_path().unwrap();
+    assert!(
+        !user_cfg.exists(),
+        "wizard should not have written template at {:?}",
+        user_cfg
+    );
 }
 
 // --- Schema versioning (Task 6) ---
@@ -1188,4 +1222,38 @@ repo_root = "/tmp/repo"
     let f = write_temp_toml(toml);
     let err = Config::load(Some(f.path())).expect_err("fetch_limit=0 must fail");
     assert!(err.to_string().contains("fetch_limit"), "{err}");
+}
+
+#[test]
+fn test_validation_rejects_schemeless_fqdn_instance() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let _cleanup = clear_all_claude_dispatch_env();
+
+    // Regression: a schemeless FQDN like "acme.atlassian.net" would otherwise
+    // round-trip through `jira_base_url()` as "https://acme.atlassian.net.atlassian.net".
+    let toml = r#"
+[jira]
+instance = "acme.atlassian.net"
+email = "a@b"
+api_token = "token"
+jql = 'status = "In Progress"'
+
+[claude]
+home_dir = "~/.claude"
+
+[paths]
+output_dir = "/tmp/tickets"
+repo_root = "/tmp/repo"
+
+[worktree]
+
+[tmux]
+
+[spawner]
+"#;
+    let f = write_temp_toml(toml);
+    let err = Config::load(Some(f.path())).expect_err("schemeless FQDN must fail");
+    let msg = err.to_string();
+    assert!(msg.contains("jira.instance"), "{msg}");
+    assert!(msg.contains("https://"), "{msg}");
 }

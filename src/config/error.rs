@@ -14,12 +14,6 @@ pub enum ConfigError {
         #[source]
         source: toml::de::Error,
     },
-    #[error("env var {var} could not be parsed as {ty}: {value}")]
-    EnvCoerce {
-        var: String,
-        ty: &'static str,
-        value: String,
-    },
     #[error("unknown schema_version {found}; this binary supports {supported:?}")]
     UnknownSchemaVersion {
         found: u32,
