@@ -38,10 +38,15 @@ jobs:
     steps:
       - name: Validate version input
         id: validate
+        env:
+          VERSION_INPUT: ${{ inputs.version }}
         run: |
-          version="${{ inputs.version }}"
+          # Route inputs.version through an env var so the regex guard runs
+          # against shell data, not an expression expanded into the script
+          # body. See GitHub's script-injection hardening guidance.
+          version="$VERSION_INPUT"
           if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]; then
-            echo "::error::Version '$version' is not valid semver (expected e.g. 0.2.0 or 1.0.0-rc.1)"
+            echo "::error::Version is not valid semver (expected e.g. 0.2.0 or 1.0.0-rc.1)"
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -204,4 +209,4 @@ jobs:
             --title "$tag" \
             --generate-notes \
             --verify-tag \
-            *.tar.gz SHA256SUMS
+            *.tar.gz *.tar.gz.sha256 SHA256SUMS

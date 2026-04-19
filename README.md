@@ -27,6 +27,8 @@ Prebuilt binaries are published for:
 - **Linux x86_64** (statically linked against musl — runs on any glibc or musl distro)
 - **macOS arm64** (Apple Silicon)
 
+Intel Macs (`x86_64-apple-darwin`) are not published as prebuilt binaries — build from source using Option B below.
+
 Windows is **not supported**: the spawner depends on `tmux` and Unix file permissions. Windows users can run `claude-dispatch` inside [WSL2](https://learn.microsoft.com/windows/wsl/install).
 
 ## Prerequisites
@@ -70,8 +72,8 @@ shasum -a 256 -c SHA256SUMS --ignore-missing
 **Option B — Build from source:**
 
 ```bash
-git clone https://github.com/tielitz/claude-jira-workflow.git
-cd claude-jira-workflow
+git clone https://github.com/tielitz/claude-dispatch.git
+cd claude-dispatch
 just setup   # configure git hooks
 just build   # compile in debug mode
 ```
