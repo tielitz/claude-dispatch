@@ -53,3 +53,7 @@ State transitions are in `src/state.rs`. The `claim_for_spawning` method uses a 
 ### The `mark-done` Subcommand
 
 `claude-dispatch mark-done TICKET_KEY` is called by the tmux wrapper script when a Claude session ends. It updates the ticket to `done` in SQLite and cleans up the wrapper script.
+
+## Workflow Preferences
+
+- Prefer to work on a feature branch unless the user explicitly asks for a worktree.

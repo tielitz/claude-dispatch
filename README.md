@@ -120,6 +120,8 @@ poll_interval_secs = 10
 
 All paths support `~/` expansion. The `jql` field controls which tickets are picked up — adjust it to match your workflow.
 
+See [Configuration](#configuration) below for details on how config files, environment variables, and CLI flags are layered.
+
 ### 3. Run
 
 ```bash
@@ -132,6 +134,56 @@ Attach to the tmux session to observe Claude Code working:
 
 ```bash
 tmux attach -t dev-pipeline
+```
+
+## Configuration
+
+`claude-dispatch` resolves its configuration from four sources, applied in ascending precedence (later sources override earlier ones):
+
+1. **Per-OS user config** — auto-discovered on startup:
+   - Linux: `~/.config/claude-dispatch/config.toml`
+   - macOS: `~/Library/Application Support/dev.claude-dispatch.claude-dispatch/config.toml`
+   - Windows: `C:\Users\<user>\AppData\Roaming\claude-dispatch\claude-dispatch\config\config.toml`
+2. **Binary-adjacent** — `config.toml` next to the executable, e.g. `target/release/config.toml`.
+
+   ⚠️ **Heads-up for system installs:** because binary-adjacent overrides the user config, anyone who can write next to the binary (e.g. `/usr/local/bin/`) can override your settings. If you install the binary to a system path, ensure the directory's permissions are tight. For untrusted multi-user setups, prefer pinning the path with `-c` or distributing the binary somewhere only the operator controls.
+3. **Environment variables** — any var prefixed `CLAUDE_DISPATCH_` overlays on top of the file sources. Use `__` (double underscore) to nest into sections:
+   - `CLAUDE_DISPATCH_JIRA__EMAIL=you@company.com`
+   - `CLAUDE_DISPATCH_SPAWNER__POLL_INTERVAL_SECS=30`
+
+   Env values are always strings; numeric and boolean fields (`fetch_limit`, `worktree.enabled`, `spawner.poll_interval_secs`, `schema_version`) accept either the native TOML type or a string parseable to it (so `"true"`, `"false"`, `"42"` all work). String fields like `jira.api_token` keep their value verbatim — `"true"` stays the literal string `"true"`.
+4. **`-c PATH` / `--config PATH`** — an explicit path that replaces both file-based defaults. Environment variables still overlay on top.
+
+### First-run wizard
+
+If no config file exists in the user-config or binary-adjacent locations (and no env vars are set), the binary writes a `config.toml` template to the per-OS user config path, prints a message pointing at the new file, and exits with status `2`. Edit it with your Jira credentials and run again.
+
+You can also bootstrap a template manually at any time:
+
+```bash
+claude-dispatch --init
+# or from the repo:
+just init-config
+```
+
+### Inspecting the merged config
+
+```bash
+claude-dispatch --print-config
+```
+
+Prints the fully merged configuration (secrets like `api_token` are redacted). Useful for debugging precedence or env-var overlay.
+
+### Schema version
+
+Each config file begins with `schema_version = 1`. Unsupported versions cause startup to abort with a clear error, so old configs are never silently misinterpreted.
+
+### Dev workflow
+
+For local development, always run with an explicit `-c config.toml` so the binary uses the repo's checked-in dev config instead of picking up your personal `~/.config/claude-dispatch/config.toml`. The `just run` recipe does this for you:
+
+```bash
+just run        # runs `cargo run -- -c config.toml`
 ```
 
 ## Development
@@ -165,7 +217,15 @@ The resulting `.tar.gz` is written to `dist/`.
 ```
 src/
 ├── main.rs          # CLI entry point, tokio runtime, pipeline orchestration
-├── config.rs        # TOML config deserialization with path expansion
+├── config/          # Layered TOML + env config loader (see Configuration above)
+│   ├── mod.rs       # Public Config struct + accessor methods
+│   ├── schema.rs    # Deserialize structs, default fns, Debug redaction
+│   ├── loader.rs    # load() orchestration, source resolution, TOML merge, env parsing
+│   ├── paths.rs     # Per-OS path helpers + ~/ expansion
+│   ├── migrate.rs   # schema_version check + future structural migrations
+│   ├── wizard.rs    # First-run template bootstrap
+│   ├── validate.rs  # Multi-issue validation pass
+│   └── error.rs     # ConfigError enum
 ├── state.rs         # SQLite state machine (WAL mode, atomic transitions)
 ├── spawner.rs       # Spawner loop: claims planned tickets, launches tmux sessions
 ├── planner.rs       # Invokes headless Claude Code to generate implementation plans
