@@ -147,34 +147,38 @@ set -uo pipefail
 cd "$CDP_REPO_ROOT" || exit 1
 export CLAUDE_CONFIG_DIR="$CDP_CLAUDE_HOME"
 
-# Mirror the entire pane (stdout+stderr) to a per-ticket implementation log
-# so that Claude's full output — including any errors — survives after the
-# tmux pane closes. Without this, the only record was scrollback in the pane.
 mkdir -p "$CDP_LOG_DIR"
 IMPL_LOG="$CDP_LOG_DIR/impl-$CDP_TICKET_KEY.log"
-exec > >(tee -a "$IMPL_LOG") 2>&1
 
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  Dev Pipeline — $CDP_TICKET_KEY"
-echo "  Plan file:  $CDP_PLAN_FILE"
-echo "  Impl log:   $IMPL_LOG"
-echo "  Started at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-echo "[claude-dispatch] invoking: claude {claude_args_str}"
-echo ""
+# Helper: print a message to both the terminal and the log file.
+# Claude itself runs with its stdout connected directly to the TTY so that its
+# interactive rendering works correctly; only the surrounding wrapper messages
+# are logged via this helper.
+log() {{ echo "$@" | tee -a "$IMPL_LOG"; }}
+
+log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+log "  Dev Pipeline — $CDP_TICKET_KEY"
+log "  Plan file:  $CDP_PLAN_FILE"
+log "  Impl log:   $IMPL_LOG"
+log "  Started at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+log ""
+log "[claude-dispatch] invoking claude"
+log "  ticket:    $CDP_TICKET_KEY"
+log "  plan file: $CDP_PLAN_FILE"
+log ""
 
 # Plan file is referenced via @<path> in the prompt — Claude reads it directly.
-# This avoids loading file content into a shell variable (ARG_MAX, metacharacters).
+# Claude runs with the real TTY as stdout so its interactive UI renders correctly.
 claude {claude_args_str}
 EXIT_CODE=$?
 
-echo ""
+log ""
 if [ $EXIT_CODE -eq 0 ]; then
-    echo "[claude-dispatch] session completed successfully for $CDP_TICKET_KEY"
+    log "[claude-dispatch] session completed successfully for $CDP_TICKET_KEY"
 else
-    echo "[claude-dispatch] session FAILED for $CDP_TICKET_KEY (exit code: $EXIT_CODE)"
-    echo "[claude-dispatch] full log: $IMPL_LOG"
+    log "[claude-dispatch] session FAILED for $CDP_TICKET_KEY (exit code: $EXIT_CODE)"
+    log "[claude-dispatch] full log: $IMPL_LOG"
 fi
 
 # Only pass --config when the parent was launched with -c. Without it, the
@@ -185,8 +189,8 @@ else
     "$CDP_BINARY" mark-done "$CDP_TICKET_KEY"
 fi
 
-echo ""
-echo "Closing in 10 seconds..."
+log ""
+log "Closing in 10 seconds..."
 sleep 10
 "#,
     );
